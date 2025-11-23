@@ -205,7 +205,7 @@ const PREVIEW_MIN_GRID_MOVEMENT: float = 1.0  # Minimum grid units to trigger pr
 # ==============================================================================
 
 ## Paint mode update interval (time between paint operations while dragging)
-## Used in: godot_25d_tileplacer_plugin.gd for paint stroke throttling
+## Used in: TileMapLayer3D_plugin.gd for paint stroke throttling
 ## Controls how frequently tiles are placed during click-and-drag painting
 ## Lower = faster painting but more CPU usage
 ## Higher = slower painting but better performance
@@ -214,7 +214,7 @@ const PREVIEW_MIN_GRID_MOVEMENT: float = 1.0  # Minimum grid units to trigger pr
 const PAINT_UPDATE_INTERVAL: float = 0.050
 
 ## Minimum grid distance to consider positions different during painting
-## Used in: godot_25d_tileplacer_plugin.gd for duplicate prevention
+## Used in: TileMapLayer3D_plugin.gd for duplicate prevention
 ## If new position is within this distance of last painted position, skip it
 ## Prevents placing multiple tiles at the same grid cell during fast mouse drags
 ## Default: 0.01 (1% of grid cell = effectively same position)

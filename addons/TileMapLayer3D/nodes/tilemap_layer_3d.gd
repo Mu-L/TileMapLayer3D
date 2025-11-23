@@ -1,4 +1,4 @@
-@icon("res://addons/godot_25d_tileplacer/assets/icons/icon.png")
+@icon("uid://b2snx34kyfmpg")
 @tool
 class_name TileMapLayer3D
 extends Node3D

@@ -123,7 +123,7 @@ func save_to_editor_settings(editor_settings: EditorSettings) -> void:
 	if not editor_settings:
 		return
 
-	var base_path: String = "addons/godot_25d_tileplacer/"
+	var base_path: String = "addons/TileMapLayer3D/"
 
 	# UI Preferences
 	editor_settings.set_setting(base_path + "show_plane_grids", show_plane_grids)
@@ -147,7 +147,7 @@ func load_from_editor_settings(editor_settings: EditorSettings) -> void:
 	if not editor_settings:
 		return
 
-	var base_path: String = "addons/godot_25d_tileplacer/"
+	var base_path: String = "addons/TileMapLayer3D/"
 
 	# UI Preferences
 	if editor_settings.has_setting(base_path + "show_plane_grids"):

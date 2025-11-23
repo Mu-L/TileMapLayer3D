@@ -17,3 +17,7 @@ config/icon="res://icon.svg"
 [dotnet]
 
 project/assembly_name="TileMapLayer3D"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/PlanarReflectorCpp/plugin.cfg", "res://addons/TileMapLayer3D/plugin.cfg", "res://addons/proton_scatter/plugin.cfg")

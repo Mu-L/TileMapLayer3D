@@ -1,7 +1,7 @@
 [gd_scene load_steps=5 format=3 uid="uid://bvxqm8r7yjwqr"]
 
-[ext_resource type="Script" uid="uid://cebux21xqk74t" path="res://addons/godot_25d_tileplacer/ui/tileset_panel.gd" id="1_x8k2j"]
-[ext_resource type="Script" uid="uid://nac4dvci5gv8" path="res://addons/godot_25d_tileplacer/ui/tileset_display.gd" id="15_37ckb"]
+[ext_resource type="Script" uid="uid://cebux21xqk74t" path="res://addons/TileMapLayer3D/ui/tileset_panel.gd" id="1_x8k2j"]
+[ext_resource type="Script" uid="uid://nac4dvci5gv8" path="res://addons/TileMapLayer3D/ui/tileset_display.gd" id="15_37ckb"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_twmpi"]
 

@@ -34,7 +34,7 @@ static var _cached_shader: Shader = null
 static func create_tile_material(texture: Texture2D, filter_mode: int = 0, render_priority: int = 0) -> ShaderMaterial:
 	# Cache shader resource for performance
 	if not _cached_shader:
-		_cached_shader = load("res://addons/godot_25d_tileplacer/shaders/tile_multimesh.gdshader")
+		_cached_shader = load("uid://huf0b1u2f55e")
 
 	var material: ShaderMaterial = ShaderMaterial.new()
 	material.shader = _cached_shader
@@ -56,7 +56,7 @@ static func create_tile_material(texture: Texture2D, filter_mode: int = 0, rende
 static func set_shader_render_priority(render_priority: int = 0) -> void:
 	# Cache shader resource for performance
 	if not _cached_shader:
-		_cached_shader = load("res://addons/godot_25d_tileplacer/shaders/tile_multimesh.gdshader")
+		_cached_shader = load("uid://huf0b1u2f55e")
 	
 	var material: ShaderMaterial = ShaderMaterial.new()
 	material.shader = _cached_shader

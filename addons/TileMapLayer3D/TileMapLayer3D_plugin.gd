@@ -59,7 +59,7 @@ func _enter_tree() -> void:
 	print("Plugin: Global settings loaded")
 
 	# Load and instantiate tileset panel
-	var panel_scene: PackedScene = load("res://addons/godot_25d_tileplacer/ui/tileset_panel.tscn")
+	var panel_scene: PackedScene = load("uid://bvxqm8r7yjwqr")
 	tileset_panel = panel_scene.instantiate() as TilesetPanel
 
 	# Add to dock
