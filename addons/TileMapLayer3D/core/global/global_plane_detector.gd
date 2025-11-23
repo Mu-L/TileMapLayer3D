@@ -129,12 +129,8 @@ static func detect_active_plane_6d(camera: Camera3D) -> int:
 
 ## Determines tile orientation from cursor plane and camera angle (CURSOR_PLANE mode)
 ## Returns orientation that PRESERVES tilt state when user has manually tilted
-##
-## CRITICAL LOGIC: This preserves tilt when on same plane, resets when switching planes
 ## - Same plane (floor → floor): Preserve tilt (e.g., FLOOR_TILT_POS_X stays tilted)
 ## - Different plane (floor → wall): Reset tilt (e.g., FLOOR_TILT_POS_X → WALL_EAST)
-##
-## This is essential for Crocotile-style placement where orientation is auto-detected
 ## but manual tilt state (R key) persists until the user switches planes
 static func detect_orientation_from_cursor_plane(plane_normal: Vector3, camera: Camera3D) -> int:
 	# Step 1: Determine BASE orientation from plane normal

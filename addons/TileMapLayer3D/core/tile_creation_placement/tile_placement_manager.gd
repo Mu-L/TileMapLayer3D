@@ -56,7 +56,7 @@ var texture_filter_mode: int = GlobalConstants.DEFAULT_TEXTURE_FILTER  # BaseMat
 
 # Placement modes
 enum PlacementMode {
-	CURSOR_PLANE,  # Place on invisible planes through cursor (Crocotile-style, default)
+	CURSOR_PLANE,  # Place on invisible planes through cursor
 	CURSOR,        # Place only at exact cursor position (precision mode)
 	RAYCAST,       # Click on existing surfaces to place tiles
 }
@@ -510,7 +510,6 @@ func handle_erase_with_undo(
 ## Finds intersection with cursor planes (CURSOR_PLANE mode)
 ## Raycasts to the active cursor plane (CURSOR_PLANE mode)
 ## Returns grid position where the ray intersects the active cursor plane
-## This is how Crocotile works: camera angle + mouse position determine placement on invisible plane
 func _raycast_to_cursor_plane(camera: Camera3D, screen_pos: Vector2) -> Vector3:
 	if not cursor_3d:
 		return Vector3.ZERO
@@ -520,7 +519,7 @@ func _raycast_to_cursor_plane(camera: Camera3D, screen_pos: Vector2) -> Vector3:
 
 	var cursor_world_pos: Vector3 = cursor_3d.get_world_position()
 
-	# Crocotile-style: Camera angle determines which plane is active (using GlobalPlaneDetector)
+	# Camera angle determines which plane is active (using GlobalPlaneDetector)
 	var active_plane_normal: Vector3 = GlobalPlaneDetector.detect_active_plane_3d(camera)
 
 	# Define only the active plane
@@ -546,7 +545,7 @@ func _raycast_to_cursor_plane(camera: Camera3D, screen_pos: Vector2) -> Vector3:
 	# Calculate intersection point
 	var intersection: Vector3 = ray_origin + ray_dir * t
 
-	# Apply canvas bounds (Crocotile-style bounded placement area)
+	# Apply canvas bounds
 	var cursor_grid: Vector3 = cursor_3d.grid_position
 	var constrained_intersection: Vector3 = _apply_canvas_bounds(
 		intersection,
@@ -560,7 +559,7 @@ func _raycast_to_cursor_plane(camera: Camera3D, screen_pos: Vector2) -> Vector3:
 	# Subtract GRID_ALIGNMENT_OFFSET because the plane was offset (prevents double-offset when tile placement adds it back)
 	return (constrained_intersection / grid_size) - GlobalConstants.GRID_ALIGNMENT_OFFSET
 
-## Applies canvas bounds to an intersection point (Crocotile-style bounded placement)
+## Applies canvas bounds to an intersection point 
 ## Locks one axis to cursor position and constrains the other two axes within max_canvas_distance
 ## This creates a bounded "canvas" area around the cursor for placement
 ##
@@ -630,7 +629,7 @@ func _apply_canvas_bounds(intersection: Vector3, plane_normal: Vector3, cursor_w
 
 ## Adds a tile to the unified MultiMesh chunk system
 ## Uses chunk-based system (1000 tiles per chunk) with absolute grid positioning
-## Supports fractional grid positions for Crocotile-style sub-grid placement
+## Supports fractional grid positions
 ## @param tile_key_override: Optional tile_key to use instead of generating from grid_pos + orientation
 ##                           CRITICAL for replace operations to maintain key consistency
 func _add_tile_to_multimesh(

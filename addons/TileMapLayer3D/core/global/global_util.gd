@@ -511,7 +511,7 @@ static func build_tile_basis(orientation: int, mesh_rotation: int, is_face_flipp
 
 
 # ==============================================================================
-# MESH ROTATION (Crocotile-style Q/E rotation)
+# MESH ROTATION ( Q/E rotation)
 # ==============================================================================
 
 ## Returns the rotation axis for in-plane mesh rotation based on orientation

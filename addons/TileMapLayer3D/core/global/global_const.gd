@@ -44,7 +44,6 @@ const DEFAULT_GRID_SNAP: float = DEFAULT_GRID_SNAP_SIZE
 ## Why this exists:
 ## - Prevents accidental placement thousands of units away
 ## - Creates intuitive "painting canvas" area around cursor
-## - Matches Crocotile's bounded canvas behavior
 ## Default: 20.0 (can place tiles 20 grid cells away from cursor)
 const MAX_CANVAS_DISTANCE: float = 20.0
 

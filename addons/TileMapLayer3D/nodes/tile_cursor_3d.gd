@@ -2,7 +2,7 @@
 class_name TileCursor3D
 extends Node3D
 
-## 3D grid cursor for Crocotile-style tile placement
+## 3D grid cursor for Grid alignment and Plane placement modes
 ## Shows where the next tile will be placed with visual crosshair
 
 @export var grid_size: float = GlobalConstants.DEFAULT_GRID_SIZE:
@@ -188,7 +188,7 @@ func move_to(pos: Vector3) -> void:
 
 ## Returns current world position (where tiles are placed)
 func get_world_position() -> Vector3:
-	# Cursor position IS the tile position (Crocotile-style)
+	# Cursor position IS the tile position 
 	# Already in world space (grid_position is scaled by grid_size in setter)
 	return position
 

@@ -293,7 +293,7 @@ func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
 
 	return AFTER_GUI_INPUT_PASS
 
-##Handle all inputs for mesh rotation (Crocotile-style) - works in all modes
+##Handle all inputs for mesh rotation
 func _handle_mesh_rotations(event: InputEvent, camera: Camera3D) -> int:
 	if is_active:
 		var needs_update: bool = false
@@ -361,7 +361,7 @@ func _handle_mesh_rotations(event: InputEvent, camera: Camera3D) -> int:
 
 	return AFTER_GUI_INPUT_PASS
 
-##Handle keyboard input for cursor movement (Crocotile-style)
+##Handle keyboard input for cursor movement
 func _handle_cursor3d_movement(event: InputEvent, camera: Camera3D) -> int:
 	# CRITICAL: Don't process WASD if a UI control has focus
 	var focused_control: Control = get_editor_interface().get_base_control().get_viewport().gui_get_focus_owner()
@@ -402,7 +402,7 @@ func _handle_cursor3d_movement(event: InputEvent, camera: Camera3D) -> int:
 
 	return AFTER_GUI_INPUT_PASS
 
-##Handle mouse motion for preview update and painting (Crocotile-style)
+##Handle mouse motion for preview update and painting
 func _handle_mouse_paiting_movement(event: InputEvent, camera: Camera3D) -> void:
 	var current_time: float = Time.get_ticks_msec() / 1000.0
 

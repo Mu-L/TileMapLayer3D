@@ -2,7 +2,7 @@
 class_name TilePreview3D
 extends Node3D
 
-## Visual preview/ghost of tile that will be placed (Crocotile-style)
+## Visual preview/ghost of tile that will be placed 
 ## Shows where tile will appear and auto-rotates based on camera angle
 
 @export var grid_size: float = GlobalConstants.DEFAULT_GRID_SIZE:
