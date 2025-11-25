@@ -157,3 +157,14 @@ Reset all saved data and clear all tiles
 ## 📄 License
 MIT License — Use freely in commercial projects, modify, and redistribute.
 
+
+## 📍ROADMAP PRIORITIES 
+1. New Feature: AUTO-TILING - This will be the focus for a new major release. 
+2. New Feature: Option to Bake as Object => New Button or UI Action to “Bake as Object” and allow sections or assets to be reused. 
+3. New Feature: “MeshMerger Advanced” =>  More controls for merging meshes and new Class and Node to allow for flexible merging to happen. 
+4. New Feature: Full support for Decal Mode => Allow to place transparent tiles on top of other TileMapLayer3D nodes (this is possible today but very manual)
+5. New Feature: Generate Primitives (Wedge, etc). Have pre-built primitives with UV maps for each side. Allow rounded shapes and more complex shapes. 
+6. New Feature: Foliage and Object Scattering System
+7. New Feature: Texture to 3D Object with depth =>  Allow Tile (Texture) to be created as a new “Object” with 3D depth => based on SpriteMesh.
+8. New Feature: New Tilt System (allows rotation on all possible variations from ANY Axis). Change how we handle Rotation and Tilt (Key R and Shift R - Keep others as is).
+
