@@ -2,11 +2,32 @@
 class_name TileKeySystem
 extends RefCounted
 
-## Integer-based tile key system
-##Handles Tile key encoding/decoding for faster lookups
+## Integer-based tile key system for efficient tile position encoding.
+##
+## COORDINATE SYSTEM LIMITS:
+## This system encodes 3D grid positions into 64-bit integer keys for O(1) lookups.
+## Each axis uses 16-bit signed integers, limiting the grid coordinate range.
+##
+## Current Configuration (COORD_SCALE = 10.0):
+##   - Grid Range: ±3,276.7 units from origin (0,0,0)
+##   - Precision: 0.1 grid units (supports 0.5 half-grid positioning)
+##   - World Range: ±3,276.7 × grid_size (e.g., with grid_size=1.0: ±3,276.7 meters)
+##
+## IMPORTANT: Tiles placed beyond ±3,276.7 grid units will experience:
+##   - Coordinate clamping (tiles placed at wrong positions)
+##   - Key collisions (multiple positions mapping to same key)
+##   - Visual artifacts and placement failures
+##
+## The minimum supported snap size is 0.5 (half-grid). Smaller snap sizes
+## (0.25, 0.125) are NOT supported with this configuration.
+##
+## See GlobalConstants.MAX_GRID_RANGE, MIN_SNAP_SIZE, GRID_PRECISION for limits.
 
-# Coordinate scaling factor (supports 3 decimal places: 0.001 precision)
-const COORD_SCALE: float = 1000.0
+# Coordinate scaling factor - determines precision vs range trade-off
+# COORD_SCALE=10 => Grid range of ±3,276.7 from origin (0.1 precision, half-grid OK)
+# COORD_SCALE=100 => Grid range of ±327.67 from origin (0.01 precision)
+# COORD_SCALE=1000 => Grid range of ±32.767 from origin (0.001 precision)
+const COORD_SCALE: float = 10.0
 
 # Maximum coordinate value (16-bit signed: -32768 to 32767)
 const MAX_COORD: int = 32767
@@ -102,17 +123,15 @@ static func key_to_string(key: int) -> String:
 	return "%.3f,%.3f,%.3f,%d" % [pos.x, pos.y, pos.z, ori]
 
 ## Validates if coordinates are within supported range
+## Uses GlobalConstants.MAX_GRID_RANGE for the limit check
 ## @param grid_pos: Grid position to validate
-## @returns: true if position can be encoded, false if out of range
+## @returns: true if position is within valid range, false if out of range
 static func is_position_valid(grid_pos: Vector3) -> bool:
-	var ix: int = int(round(grid_pos.x * COORD_SCALE))
-	var iy: int = int(round(grid_pos.y * COORD_SCALE))
-	var iz: int = int(round(grid_pos.z * COORD_SCALE))
-
+	var max_range: float = GlobalConstants.MAX_GRID_RANGE
 	return (
-		ix >= MIN_COORD and ix <= MAX_COORD and
-		iy >= MIN_COORD and iy <= MAX_COORD and
-		iz >= MIN_COORD and iz <= MAX_COORD
+		abs(grid_pos.x) <= max_range and
+		abs(grid_pos.y) <= max_range and
+		abs(grid_pos.z) <= max_range
 	)
 
 ## Returns the maximum grid coordinate that can be encoded

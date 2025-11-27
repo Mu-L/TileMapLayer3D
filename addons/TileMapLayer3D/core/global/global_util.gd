@@ -14,6 +14,38 @@ class_name GlobalUtil
 # Cache shader resource for performance
 static var _cached_shader: Shader = null
 
+
+## Creates a StandardMaterial3D configured for unshaded rendering
+## Single source of truth for simple unshaded materials used throughout the plugin.
+##
+## This replaces duplicate StandardMaterial3D creation code across:
+## - TilePreview3D (grid indicators)
+## - TileCursor3D (cursor center and axis lines)
+## - CursorPlaneVisualizer (grid overlays)
+## - AreaFillSelector3D (selection box)
+##
+## @param color: Albedo color (alpha determines transparency)
+## @param cull_disabled: Whether to render both sides (default: false)
+## @param render_priority: Material render priority (default: DEFAULT_RENDER_PRIORITY)
+## @returns: StandardMaterial3D configured for unshaded, transparent rendering
+##
+## Example:
+##   var material = GlobalUtil.create_unshaded_material(Color(1, 0.8, 0, 0.9))
+##   indicator_mesh.material_override = material
+static func create_unshaded_material(
+	color: Color,
+	cull_disabled: bool = false,
+	render_priority: int = GlobalConstants.DEFAULT_RENDER_PRIORITY
+) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.render_priority = render_priority
+	if cull_disabled:
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return material
+
 ## Creates a ShaderMaterial for tile rendering
 ## This is the ONLY place where tile materials should be created.
 ##
@@ -60,8 +92,28 @@ static func set_shader_render_priority(render_priority: int = 0) -> void:
 # ORIENTATION & TRANSFORM UTILITIES
 # ==============================================================================
 
-## Tile orientation enum (should match TilePlacementManager.TileOrientation)
-## 18-state system: 6 base + 12 tilted variants for ramps, roofs, and slanted walls
+# =============================================================================
+# TILE ORIENTATION ENUM - SINGLE SOURCE OF TRUTH
+# =============================================================================
+# This is the CANONICAL definition of TileOrientation used throughout the codebase.
+# All other files should reference GlobalUtil.TileOrientation, NOT define their own.
+#
+# 18-state system: 6 base orientations + 12 tilted variants
+# - Base orientations (0-5): Floor, Ceiling, and 4 walls
+# - Tilted variants (6-17): 45° rotations for ramps, roofs, and slanted walls
+#
+# Used by:
+#   - TilePlacementManager (core/tile_creation_placement/tile_placement_manager.gd)
+#   - GlobalPlaneDetector (core/global/global_plane_detector.gd)
+#   - TilePreview3D (nodes/tile_preview_3d.gd)
+#   - PlaneCoordinateMapper (core/autotile/plane_coordinate_mapper.gd)
+#   - And many other files throughout the plugin
+#
+# To reference these values:
+#   GlobalUtil.TileOrientation.FLOOR
+#   GlobalUtil.TileOrientation.WALL_NORTH
+#   etc.
+# =============================================================================
 enum TileOrientation {
 	# === BASE ORIENTATIONS ===
 	FLOOR = 0,
@@ -978,8 +1030,43 @@ static func create_highlight_material() -> StandardMaterial3D:
 	# Unshaded = bright, no lighting calculations
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
-	# Render on top of tiles
-	material.render_priority = 10
+	# Render on top of tiles (use centralized constant)
+	material.render_priority = GlobalConstants.HIGHLIGHT_RENDER_PRIORITY
+
+	# Always visible (ignore depth buffer)
+	material.no_depth_test = true
+
+	# Visible from both sides
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	return material
+
+## Creates a material for blocked position highlighting (bright red)
+## Used for showing when cursor is outside valid coordinate range (±3,276.7)
+##
+## Properties:
+##   - Bright red color (TILE_BLOCKED_HIGHLIGHT_COLOR)
+##   - Alpha transparency enabled
+##   - Unshaded (bright, doesn't react to light)
+##   - High render priority (renders on top of tiles)
+##   - No depth testing (always visible through geometry)
+##   - Double-sided (visible from both sides)
+##
+## @returns: StandardMaterial3D configured for blocked position overlays
+static func create_blocked_highlight_material() -> StandardMaterial3D:
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+
+	# Bright red color for blocked positions
+	material.albedo_color = GlobalConstants.TILE_BLOCKED_HIGHLIGHT_COLOR
+
+	# Enable alpha transparency
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+
+	# Unshaded = bright, no lighting calculations
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	# Render on top of tiles (use centralized constant)
+	material.render_priority = GlobalConstants.HIGHLIGHT_RENDER_PRIORITY
 
 	# Always visible (ignore depth buffer)
 	material.no_depth_test = true
@@ -1100,8 +1187,8 @@ static func create_area_selection_material() -> StandardMaterial3D:
 	# Unshaded = bright, no lighting calculations
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
-	# Render on top of scene
-	material.render_priority = 10
+	# Render on top of scene (use centralized constant)
+	material.render_priority = GlobalConstants.AREA_FILL_RENDER_PRIORITY
 
 	# Always visible (ignore depth buffer)
 	material.no_depth_test = true
@@ -1110,6 +1197,88 @@ static func create_area_selection_material() -> StandardMaterial3D:
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 	return material
+
+
+## Creates a StandardMaterial3D for grid line visualization
+## Used by CursorPlaneVisualizer and AreaFillSelector3D for grid overlays
+##
+## Properties:
+##   - Customizable color (passed as parameter)
+##   - Alpha transparency enabled
+##   - Unshaded (bright, doesn't react to light)
+##   - Vertex color enabled (for per-vertex color variation)
+##   - High render priority (renders on top)
+##
+## @param color: Color - The color for grid lines (alpha determines transparency)
+## @returns: StandardMaterial3D configured for grid line visualization
+##
+## Example:
+##   var material = GlobalUtil.create_grid_line_material(Color(0.5, 0.5, 0.5, 0.5))
+##   grid_mesh.material_override = material
+static func create_grid_line_material(color: Color) -> StandardMaterial3D:
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+
+	# Use provided color
+	material.albedo_color = color
+
+	# Enable alpha transparency
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+
+	# Unshaded = bright, no lighting calculations
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	# Enable vertex colors for per-vertex color variation
+	material.vertex_color_use_as_albedo = true
+
+	# Render on top of tiles (use centralized constant)
+	material.render_priority = GlobalConstants.GRID_OVERLAY_RENDER_PRIORITY
+
+	return material
+
+
+# ==============================================================================
+# UI SCALING UTILITIES (DPI-aware)
+# ==============================================================================
+
+## Returns the editor scale factor for DPI-aware UI sizing
+## The editor scale is set via Editor Settings → Interface → Editor → Display Scale
+## Note: The editor must be restarted for scale changes to take effect
+##
+## @returns: Scale factor (1.0 = 100%, 1.5 = 150%, 2.0 = 200%)
+##
+## Usage:
+##   var scale: float = GlobalUtil.get_editor_scale()
+##   button.custom_minimum_size = Vector2(100, 30) * scale
+static func get_editor_scale() -> float:
+	if Engine.is_editor_hint():
+		return EditorInterface.get_editor_scale()
+	return 1.0
+
+
+## Scales a Vector2i by the editor scale factor for dialog/window sizes
+## Use this for popup_centered() calls to ensure dialogs scale with DPI
+##
+## @param base_size: Base size at 100% scale
+## @returns: Scaled size based on current editor scale
+##
+## Usage:
+##   dialog.popup_centered(GlobalUtil.scale_ui_size(GlobalConstants.UI_DIALOG_SIZE_DEFAULT))
+static func scale_ui_size(base_size: Vector2i) -> Vector2i:
+	var scale: float = get_editor_scale()
+	return Vector2i(int(base_size.x * scale), int(base_size.y * scale))
+
+
+## Scales an integer value by the editor scale factor for margins/padding
+## Use this for theme_override_constants and custom_minimum_size values
+##
+## @param base_value: Base value at 100% scale
+## @returns: Scaled value based on current editor scale
+##
+## Usage:
+##   margin.add_theme_constant_override("margin_left", GlobalUtil.scale_ui_value(4))
+static func scale_ui_value(base_value: int) -> int:
+	return int(base_value * get_editor_scale())
+
 
 # ==============================================================================
 # DOCUMENTATION GUIDELINES

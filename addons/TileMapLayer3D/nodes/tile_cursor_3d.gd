@@ -34,6 +34,9 @@ extends Node3D
 		if _plane_visualizer:
 			_plane_visualizer.visible_planes = value
 
+## Cursor movement step size (minimum 0.5 due to coordinate system precision)
+## Controls how far the cursor moves with WASD keys
+## See GlobalConstants.MIN_SNAP_SIZE and TileKeySystem for coordinate limits
 @export var cursor_step_size: float = GlobalConstants.DEFAULT_CURSOR_STEP_SIZE:
 	set(value):
 		if not Engine.is_editor_hint(): return
@@ -42,8 +45,12 @@ extends Node3D
 
 @export var cursor_start_position: Vector3 = GlobalConstants.DEFAULT_CURSOR_START_POSITION
 
-# Fractional grid position - supports sub-grid positioning (0.5, 1.75, 2.25...)
-# This is the source of truth for cursor position - tiles place exactly here
+## Fractional grid position - supports half-grid positioning (0.5, 1.5, 2.5...)
+## This is the source of truth for cursor position - tiles place exactly here.
+##
+## COORDINATE LIMITS: Valid range is ±3,276.7 on each axis.
+## Positions beyond this range will cause tile placement errors.
+## See TileKeySystem and GlobalConstants.MAX_GRID_RANGE for details.
 var grid_position: Vector3 = Vector3.ZERO:
 	set(value):
 		if not Engine.is_editor_hint(): return
@@ -77,11 +84,7 @@ func _create_cursor_visual() -> void:
 	_mesh_instance.mesh = box_mesh
 	_mesh_instance.position = cursor_start_position  # No offset - cursor is at exact position
 
-	var material: StandardMaterial3D = StandardMaterial3D.new()
-	material.albedo_color = GlobalConstants.CURSOR_CENTER_COLOR
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_mesh_instance.material_override = material
+	_mesh_instance.material_override = GlobalUtil.create_unshaded_material(GlobalConstants.CURSOR_CENTER_COLOR)
 
 	add_child(_mesh_instance)
 	# DO NOT set owner - cursor is runtime-only and should not be saved to scene
@@ -109,12 +112,7 @@ func _create_axis_line(direction: Vector3, line_color: Color) -> MeshInstance3D:
 		box.size = Vector3(thickness, thickness, crosshair_length * 2)
 
 	line_mesh.mesh = box
-
-	var material: StandardMaterial3D = StandardMaterial3D.new()
-	material.albedo_color = line_color
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	line_mesh.material_override = material
+	line_mesh.material_override = GlobalUtil.create_unshaded_material(line_color)
 
 	add_child(line_mesh)
 	# DO NOT set owner - cursor is runtime-only and should not be saved to scene
@@ -187,10 +185,11 @@ func move_to(pos: Vector3) -> void:
 	grid_position = pos
 
 ## Returns current world position (where tiles are placed)
+## Uses global_position to correctly account for parent TileMapLayer3D's transform
 func get_world_position() -> Vector3:
-	# Cursor position IS the tile position 
-	# Already in world space (grid_position is scaled by grid_size in setter)
-	return position
+	# Return actual world position including parent transform
+	# This allows TileMapLayer3D to be moved away from scene origin
+	return global_position
 
 ## Highlights the active plane based on camera angle
 func set_active_plane(active_plane_normal: Vector3) -> void:

@@ -78,7 +78,10 @@ func _create_plane_mesh(normal: Vector3, color: Color) -> MeshInstance3D:
 	var immediate_mesh: ImmediateMesh = ImmediateMesh.new()
 	mesh_instance.mesh = immediate_mesh
 
-	# Create unshaded material
+	# Create unshaded material for grid lines
+	# NOTE: Uses default render_priority (0) which is correct - grid lines should
+	# render behind tiles (which also use priority 0) and behind highlights (priority 10).
+	# See GlobalConstants.DEFAULT_RENDER_PRIORITY for the standard tile render priority.
 	var material: StandardMaterial3D = StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -244,7 +247,7 @@ func _update_visibility() -> void:
 ## active_plane_normal: Vector3.RIGHT (YZ), Vector3.UP (XZ), or Vector3.FORWARD (XY)
 func set_active_plane(active_plane_normal: Vector3) -> void:
 	if not visible_planes:
-		print("trying to set_active_plane - no planes visible - returning")
+		#print("trying to set_active_plane - no planes visible - returning")
 		return
 
 	# print("set_active_plane - activating planes")

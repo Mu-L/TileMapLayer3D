@@ -80,6 +80,11 @@ var _highlight_multimesh: MultiMesh = null
 var _highlight_instance: MultiMeshInstance3D = null
 var _highlighted_tile_keys: Array[int] = []
 
+# Blocked position highlight overlay - shows when cursor is outside valid range - EDITOR ONLY
+var _blocked_highlight_multimesh: MultiMesh = null
+var _blocked_highlight_instance: MultiMeshInstance3D = null
+var _is_blocked_highlight_visible: bool = false
+
 ## Reference to a tile's location in the chunk system
 class TileRef:
 	var chunk_index: int = -1
@@ -119,6 +124,9 @@ func _ready() -> void:
 
 	# Create highlight overlay for Box Erase feature
 	_create_highlight_overlay()
+
+	# Create blocked highlight overlay for out-of-bounds positions
+	_create_blocked_highlight_overlay()
 
 	# Migrate legacy properties from old scenes (if needed)
 	call_deferred("_migrate_legacy_properties")
@@ -168,7 +176,7 @@ func _apply_settings() -> void:
 
 	# Handle grid size change - requires chunk rebuild with mesh recreation
 	if abs(old_grid_size - grid_size) > 0.001 and saved_tiles.size() > 0:
-		print("TileMapLayer3D: Grid size changed to ", grid_size, ", rebuilding chunks...")
+		#print("TileMapLayer3D: Grid size changed to ", grid_size, ", rebuilding chunks...")
 		call_deferred("_rebuild_chunks_from_saved_data", true)  # force_mesh_rebuild=true
 
 	# Handle collision enable/disable
@@ -283,9 +291,9 @@ func _rebuild_chunks_from_saved_data(force_mesh_rebuild: bool = false) -> void:
 	if _saved_tiles_lookup.size() > 0:
 		var first_key: Variant = _saved_tiles_lookup.keys()[0]
 		if first_key is String:
-			print("TileMapLayer3D: Migrating %d tiles from string keys to integer keys..." % _saved_tiles_lookup.size())
+			#print("TileMapLayer3D: Migrating %d tiles from string keys to integer keys..." % _saved_tiles_lookup.size())
 			_saved_tiles_lookup = GlobalUtil.migrate_placement_data(_saved_tiles_lookup)
-			print("TileMapLayer3D: Migration complete!")
+			#print("TileMapLayer3D: Migration complete!")
 
 	# STEP 5: Recreate tiles from saved data
 	for tile_data in saved_tiles:
@@ -346,16 +354,67 @@ func _update_material() -> void:
 	if tileset_texture:
 		# Always recreate material to ensure filter mode is applied
 		_shared_material = GlobalUtil.create_tile_material(tileset_texture, texture_filter_mode, render_priority)
-		
+
 		# Update material on all square chunks
 		for chunk in _quad_chunks:
 			if chunk:
 				chunk.material_override = _shared_material
-		
+
 		# Update material on all triangle chunks
 		for chunk in _triangle_chunks:
 			if chunk:
 				chunk.material_override = _shared_material
+
+
+## Update the UV rect of an existing tile (for autotiling neighbor updates)
+## Returns true if update succeeded
+func update_tile_uv(tile_key: int, new_uv: Rect2) -> bool:
+	if not Engine.is_editor_hint():
+		push_warning("update_tile_uv: Not in editor mode")
+		return false
+
+	# Get tile reference
+	var tile_ref: TileRef = _tile_lookup.get(tile_key, null)
+	if tile_ref == null:
+		push_warning("update_tile_uv: tile_key ", tile_key, " not found in _tile_lookup (", _tile_lookup.size(), " entries)")
+		return false
+
+	# Get the chunk based on mesh mode
+	var chunk: MultiMeshTileChunkBase
+	if tile_ref.mesh_mode == GlobalConstants.MeshMode.MESH_SQUARE:
+		if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < _quad_chunks.size():
+			chunk = _quad_chunks[tile_ref.chunk_index]
+	else:
+		if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < _triangle_chunks.size():
+			chunk = _triangle_chunks[tile_ref.chunk_index]
+
+	if chunk == null:
+		push_warning("update_tile_uv: chunk is null for tile_key ", tile_key, " (chunk_index=", tile_ref.chunk_index, ")")
+		return false
+
+	# Calculate new UV data
+	if not tileset_texture:
+		push_warning("update_tile_uv: tileset_texture is null! Cannot update UV.")
+		return false
+
+	var atlas_size: Vector2 = tileset_texture.get_size()
+	var uv_data: Dictionary = GlobalUtil.calculate_normalized_uv(new_uv, atlas_size)
+	var custom_data: Color = uv_data.uv_color
+
+	# Update the MultiMesh instance
+	chunk.multimesh.set_instance_custom_data(tile_ref.instance_index, custom_data)
+
+	# Update the TileRef
+	tile_ref.uv_rect = new_uv
+
+	# Update saved_tiles if the tile exists there
+	for saved_tile: TilePlacerData in saved_tiles:
+		var saved_key: int = GlobalUtil.make_tile_key(saved_tile.grid_position, saved_tile.orientation)
+		if saved_key == tile_key:
+			saved_tile.uv_rect = new_uv
+			break
+
+	return true
 
 func get_shared_material() -> ShaderMaterial:
 	# Ensure material exists before returning
@@ -559,6 +618,16 @@ func remove_saved_tile_data(tile_key: Variant) -> void:
 		_saved_tiles_lookup[key] = i
 
 
+## Updates the terrain_id on a saved tile (for autotile persistence)
+## Called by AutotilePlacementExtension after setting terrain_id on placement_data
+func update_saved_tile_terrain(tile_key: int, terrain_id: int) -> void:
+	if not _saved_tiles_lookup.has(tile_key):
+		return
+	var tile_index: int = _saved_tiles_lookup[tile_key]
+	if tile_index >= 0 and tile_index < saved_tiles.size():
+		saved_tiles[tile_index].terrain_id = terrain_id
+
+
 func clear_collision_shapes() -> void:
 	var _current_collisions_bodies: Array[StaticCollisionBody3D] = []
 
@@ -685,6 +754,115 @@ func clear_highlights() -> void:
 	if _highlight_multimesh:
 		_highlight_multimesh.visible_instance_count = 0
 		_highlighted_tile_keys.clear()
+
+# ==============================================================================
+# BLOCKED POSITION HIGHLIGHT (Out-of-bounds warning)
+# ==============================================================================
+
+## Creates the blocked position highlight overlay (bright red box)
+## Used to show when cursor is outside valid coordinate range (±3,276.7)
+## Editor-only - not saved to scene
+func _create_blocked_highlight_overlay() -> void:
+	# Create MultiMesh for blocked highlight (single instance only)
+	_blocked_highlight_multimesh = MultiMesh.new()
+	_blocked_highlight_multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	_blocked_highlight_multimesh.instance_count = 1  # Only need one for cursor position
+	_blocked_highlight_multimesh.visible_instance_count = 0
+
+	# Create box mesh for blocked highlight (same size as tiles)
+	var box: BoxMesh = BoxMesh.new()
+	box.size = Vector3(grid_size * 1.1, grid_size * 1.1, 0.15)  # 10% larger, slightly thicker
+	_blocked_highlight_multimesh.mesh = box
+
+	# Create instance node
+	_blocked_highlight_instance = MultiMeshInstance3D.new()
+	_blocked_highlight_instance.name = "BlockedPositionHighlight"
+	_blocked_highlight_instance.multimesh = _blocked_highlight_multimesh
+	_blocked_highlight_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+	# Apply blocked highlight material (bright red)
+	_blocked_highlight_instance.material_override = GlobalUtil.create_blocked_highlight_material()
+
+	add_child(_blocked_highlight_instance)
+	# DO NOT set owner - highlight overlay is editor-only, not saved to scene
+
+## Shows a blocked position highlight at the given grid position
+## Replaces the normal tile preview to indicate placement is not allowed
+## @param grid_pos: Grid position that is blocked
+## @param orientation: Tile orientation (0-17)
+func show_blocked_highlight(grid_pos: Vector3, orientation: int) -> void:
+	if not _blocked_highlight_multimesh:
+		return
+
+	# Build transform for the blocked position
+	var blocked_transform: Transform3D = GlobalUtil.build_tile_transform(
+		grid_pos,
+		orientation,
+		0,  # No rotation
+		grid_size,
+		self,
+		false  # No flip
+	)
+
+	# Rotate 90 degrees around X-axis to align BoxMesh with QuadMesh orientation
+	var rotation_correction: Basis = Basis(Vector3.RIGHT, deg_to_rad(-90.0))
+	blocked_transform.basis = blocked_transform.basis * rotation_correction
+
+	# Offset slightly outward along surface normal to prevent z-fighting
+	var surface_normal: Vector3 = blocked_transform.basis.y.normalized()
+	blocked_transform.origin += surface_normal * 0.02  # 2cm offset (more visible than regular highlight)
+
+	# Set the transform and show
+	_blocked_highlight_multimesh.set_instance_transform(0, blocked_transform)
+	_blocked_highlight_multimesh.visible_instance_count = 1
+	_is_blocked_highlight_visible = true
+
+## Clears the blocked position highlight
+func clear_blocked_highlight() -> void:
+	if _blocked_highlight_multimesh:
+		_blocked_highlight_multimesh.visible_instance_count = 0
+		_is_blocked_highlight_visible = false
+
+## Returns whether the blocked highlight is currently visible
+func is_blocked_highlight_visible() -> bool:
+	return _is_blocked_highlight_visible
+
+# ==============================================================================
+# CONFIGURATION WARNINGS
+# ==============================================================================
+
+## Returns configuration warnings to display in the Godot Inspector
+## Shows warnings for missing texture, excessive tile count, or out-of-bounds tiles
+func _get_configuration_warnings() -> PackedStringArray:
+	var warnings := PackedStringArray()
+
+	# Check 1: No tileset texture configured
+	if not settings or not settings.tileset_texture:
+		warnings.push_back("No tileset texture configured. Assign a texture in the Inspector (Settings > Tileset Texture).")
+
+	# Check 2: Tile count exceeds recommended maximum
+	# Use saved_tiles.size() directly - this is the authoritative runtime count
+	# The saved_tiles array IS updated during runtime tile operations
+	var total_tiles: int = saved_tiles.size()
+	if total_tiles > GlobalConstants.MAX_RECOMMENDED_TILES:
+		warnings.push_back("Tile count (%d) exceeds recommended maximum (%d). Performance may degrade. Consider using multiple TileMapLayer3D nodes." % [
+			total_tiles,
+			GlobalConstants.MAX_RECOMMENDED_TILES
+		])
+
+	# Check 3: Tiles outside valid coordinate range
+	var out_of_bounds_count: int = 0
+	for tile_data: TilePlacerData in saved_tiles:
+		if not TileKeySystem.is_position_valid(tile_data.grid_position):
+			out_of_bounds_count += 1
+
+	if out_of_bounds_count > 0:
+		warnings.push_back("Found %d tiles outside valid coordinate range (±%.1f). These tiles may display incorrectly." % [
+			out_of_bounds_count,
+			GlobalConstants.MAX_GRID_RANGE
+		])
+
+	return warnings
 
 ## Helper to retrieve chunk from TileRef
 ## @param tile_ref: Reference to tile's location in chunk system
