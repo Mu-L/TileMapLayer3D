@@ -49,6 +49,8 @@ addons/*
 *.gitignore
 *.gitattributes
 *.editorconfig
+/.github/
+*.github
 LocalDev/
 TEste/
 Teste/
