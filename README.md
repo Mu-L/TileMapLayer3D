@@ -159,7 +159,7 @@ Create a Collision for your TileMapLayer3D node
 Reset all saved data and clear all tiles
 
 ## 📄 License
-MIT License — Use freely in commercial projects, modify, and redistribute.
+GNU GENERAL PUBLIC LICENSE
 
 
 ## 📍ROADMAP PRIORITIES 
