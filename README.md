@@ -4,7 +4,7 @@ UPDATE: New Auto-tiling feature is experimental and breaks compatibility with pr
 
 Godot 4.5+ editor plugin for building 3D tile-based levels from 2D tilesheets. This is heavily inspired by Crocotile but built directly into Godot. 
 
-![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-blue) ![License MIT](https://img.shields.io/badge/license-MIT-green)
+![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-blue) 
 
 ## Want to support me?
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/dantrz)
