@@ -10,13 +10,10 @@ Godot 4.5+ editor plugin for building 3D tile-based levels from 2D tilesheets. T
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/dantrz)
 or via GitHub: [Sponsor DanTrz](https://github.com/sponsors/DanTrz)
 
-## Basic Navigation Video Tutorial
+## Tutorial and Auto-Tiling Setup Video
 
-[![TileMap3DLayer Intro](http://img.youtube.com/vi/Ogpy8xgyBeY/0.jpg)](https://www.youtube.com/watch?v=Ogpy8xgyBeY)
+[![TileMapLayer3D - Tutorial Auto tiling overview](http://img.youtube.com/vi/ZmxgWqF22-A/0.jpg)](https://www.youtube.com/watch?v=ZmxgWqF22-A)
 
-## Collision and Mesh export Video Tutorial
-[![Collision and Mesh Baking Generation Tutorial](http://img.youtube.com/vi/SdWBvPexwTk/0.jpg)](https://www.youtube.com/watch?v=SdWBvPexwTk)
----
 
 ## 🎯 Why I created this?
 
