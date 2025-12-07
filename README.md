@@ -2,7 +2,7 @@
 
 UPDATE: New Auto-tiling feature is experimental and breaks compatibility with previous versions
 
-Godot 4.5+ editor plugin for building 3D tile-based levels from 2D tilesheets. This is heavily inspired by Crocotile but built directly into Godot. 
+Godot 4.5+ editor plugin for building 3D tile-based levels from 2D TileSets. This is heavily inspired by Crocotile but built directly into Godot. 
 
 ![Godot 4.5+](https://img.shields.io/badge/Godot-4.5%2B-blue) 
 
@@ -24,7 +24,7 @@ You can create entire levels, or you can create reusable objects and assets usin
 
 ## ✨ What You Can Do
 
-- ✅ **Paint 3D levels from 2D tilesheets** — Import any tilesheet, select tiles, click to place
+- ✅ **Paint 3D levels from 2D TileSets** — Import any tilesheet, select tiles, click to place
 - ✅ **Multi-tile selection** — Select up to 48 tiles and place them as a group
 - ✅ **Flexible placement** — Paint on floor, walls, ceiling (6 orientations)
 - ✅ **Transform on the fly** — Rotate (Q/E), tilt (R), flip (F), reset (T)
