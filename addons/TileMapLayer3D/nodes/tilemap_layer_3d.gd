@@ -36,16 +36,6 @@ const CollisionGenerator = preload("uid://cu1e5kkaoxgun")
 ## DEPRECATED - kept temporarily for one-time migration from old scenes
 ## Will be cleared after migration and should be empty in new scenes
 @export var saved_tiles: Array[TilePlacerData] = []
-@export_group("Decal Mode")
-@export var decal_mode: bool = false  # If true, tiles render as decals (no overlap z-fighting)
-@export var decal_target_node: TileMapLayer3D = null  # Node to use as base for decal offset calculations
-@export var decal_y_offset: float = 0.01  # Pushes the node upwards to avoid z-fighting when in decal mode
-@export var decal_z_offset: float = 0.01  # Pushes the node forwards to avoid z-fighting when in decal mode
-@export var render_priority: int = GlobalConstants.DEFAULT_RENDER_PRIORITY
-var _chunk_shadow_casting: int = GeometryInstance3D.SHADOW_CASTING_SETTING_ON  # Default shadow casting setting for chunks
-# var decal_target_position: Vector3 = Vector3(self.global_position.y +decal_y_offset	, self.global_position.z + decal_z_offset, self.global_position.x) # Internal storage for decal target position
-
-
 
 # ============================================================================
 # TILE STORAGE - Columnar Format for Efficient Serialization

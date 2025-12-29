@@ -99,46 +99,28 @@ signal autotile_tileset_changed(tileset: TileSet)
 signal autotile_terrain_selected(terrain_id: int)
 # Emitted when TileSet content changes (terrains, peering bits) - triggers engine rebuild
 signal autotile_data_changed()
+# Emitted when user confirms texture change that requires clearing the TileSet
+signal clear_autotile_requested()
+# Emitted when autotile mesh mode changes (FLAT_SQUARE or BOX_MESH only)
+signal autotile_mesh_mode_changed(mesh_mode: int)
+# Emitted when autotile depth scale changes (for BOX/PRISM mesh modes)
+signal autotile_depth_changed(depth: float)
+# Emitted when user requests Sprite Mesh creation from UI (Clicking the button)
+signal request_sprite_mesh_creation(current_texture: Texture2D, selected_tiles: Array[Rect2], tile_size: Vector2i, grid_size: float)
 
-# Node references (using unique names %)
-@onready var load_texture_button: Button = %LoadTextureButton
-@onready var texture_path_label: Label = %TexturePathLabel
-@onready var tile_size_x: SpinBox = %TileSizeX
-@onready var tile_size_y: SpinBox = %TileSizeY
-@onready var tileset_display: TextureRect = %TilesetDisplay
-@onready var load_texture_dialog: FileDialog = %LoadTextureDialog
-@onready var selection_highlight: ColorRect = %SelectionHighlight
-@onready var scroll_container: ScrollContainer = %TileSetScrollContainer
-@onready var mesh_mode_dropdown: OptionButton = %MeshModeDropdown
-@onready var export_and_collision_tab: VBoxContainer = %Export_Collision
-@onready var manual_tiling_tab: VBoxContainer = %Manual_Tiling
-@onready var auto_tile_tab: VBoxContainer = %"Auto_Tiling"
-@onready var cursor_position_label: Label = %CursorPositionLabel
-@onready var show_plane_grids_checkbox: CheckBox = %ShowPlaneGridsCheckbox
-@onready var cursor_step_dropdown: OptionButton = %CursorStepDropdown
-@onready var grid_snap_dropdown: OptionButton = %GridSnapDropdown
-@onready var grid_size_spinbox: SpinBox = %GridSizeSpinBox
-@onready var grid_size_confirm_dialog: ConfirmationDialog = %GridSizeConfirmDialog
-@onready var texture_filter_dropdown: OptionButton = %TextureFilterDropdown
-
-@onready var create_collision_button: Button = %CreateCollisionBtn 
-@onready var collision_check_box: CheckBox = %CollisionCheckBox
-
-@onready var bake_alpha_check_box: CheckBox = %BakeAlphaCheckBox
-@onready var bake_mesh_button: Button = %BakeMeshButton
-@onready var clear_all_tiles_button: Button = %ClearAllTilesButton
-@onready var show_debug_button: Button = %ShowDebugInfo
-
-# Autotile tab reference
-
-
-# TabContainer reference for detecting tab changes
-@onready var _tab_container: TabContainer = $TabContainer
+# Maps AutoTile dropdown indices to actual MeshMode values
+# AutoTile only supports FLAT_SQUARE (0) and BOX_MESH (2) - NO triangles
+const AUTOTILE_MESH_MODE_MAP: Array[int] = [
+	GlobalConstants.MeshMode.FLAT_SQUARE,  # Index 0 → value 0
+	GlobalConstants.MeshMode.BOX_MESH,     # Index 1 → value 2
+]
 
 # State
 var current_node: TileMapLayer3D = null  # Reference to currently edited node
 var _is_loading_from_node: bool = false  # Prevents signal loops during UI updates
 var current_texture: Texture2D = null
+# SelectionManager reference - UI subscribes to this for selection state
+var _selection_manager: SelectionManager = null
 var _tile_size: Vector2i = GlobalConstants.DEFAULT_TILE_SIZE
 var selected_tile_coords: Vector2i = Vector2i(0, 0)
 var has_selection: bool = false
@@ -159,37 +141,6 @@ var _current_tiling_mode: TilingMode = TilingMode.MANUAL
 var _is_dragging: bool = false
 var _drag_start_pos: Vector2 = Vector2.ZERO
 var _selected_tiles: Array[Rect2] = []  # Multiple UV rects for multi-selection
-const MAX_SELECTION_SIZE: int = 48  # Maximum tiles in selection //TODO: MOVE TO CONSTANT GLOBAL
-
-
-## Returns current tile size (used by AutotileTab for TileSet creation)
-func get_tile_size() -> Vector2i:
-	return _tile_size
-
-
-## Returns the currently loaded tileset texture (or null if none)
-## Used by AutotileTab to auto-populate new TileSets with atlas source
-func get_tileset_texture() -> Texture2D:
-	return current_texture
-
-
-## Updates the tileset texture and refreshes the Manual tab UI
-## Called when Auto-Tiling loads a TileSet with atlas texture
-func set_tileset_texture(texture: Texture2D) -> void:
-	if texture == current_texture:
-		return  # No change needed
-
-	current_texture = texture
-	if tileset_display:
-		tileset_display.texture = texture
-		if texture:
-			# Set TextureRect to actual texture size for pixel-perfect display
-			tileset_display.custom_minimum_size = texture.get_size()
-			tileset_display.size = texture.get_size()
-
-	# Reset selection when texture changes
-	clear_selection()
-
 
 func _ready() -> void:
 	#if not Engine.is_editor_hint(): return
@@ -326,8 +277,98 @@ func _connect_signals() -> void:
 		if not auto_tile_tab.tileset_data_changed.is_connected(_on_autotile_data_changed):
 			auto_tile_tab.tileset_data_changed.connect(_on_autotile_data_changed)
 			#print("   AutotileTab tileset_data_changed connected")
+		if not auto_tile_tab.autotile_depth_changed.is_connected(_on_autotile_depth_changed):
+			auto_tile_tab.autotile_depth_changed.connect(_on_autotile_depth_changed)
+			#print("   AutotileTab autotile_depth_changed connected")
 
-	#print("TilesetPanel: Signal connections complete")
+	# Connect autotile mesh mode dropdown
+	if autotile_mesh_dropdown and not autotile_mesh_dropdown.item_selected.is_connected(_on_autotile_mesh_mode_selected):
+		autotile_mesh_dropdown.item_selected.connect(_on_autotile_mesh_mode_selected)
+		#print("   AutoTile mesh mode dropdown connected")
+
+	#Connect Sprite Mesh signals and nodes
+	generate_sprite_mesh_btn.pressed.connect(_on_generate_sprite_mesh_btn_pressed)
+		#print("   Generate SpriteMesh button connected")
+
+
+## Returns current tile size (used by AutotileTab for TileSet creation)
+func get_tile_size() -> Vector2i:
+	return _tile_size
+
+
+## Sets the SelectionManager reference and connects to its signals
+## This makes TilesetPanel a subscriber to SelectionManager state changes
+func set_selection_manager(manager: SelectionManager) -> void:
+	# Disconnect from old manager
+	if _selection_manager:
+		if _selection_manager.selection_changed.is_connected(_on_selection_manager_changed):
+			_selection_manager.selection_changed.disconnect(_on_selection_manager_changed)
+		if _selection_manager.selection_cleared.is_connected(_on_selection_manager_cleared):
+			_selection_manager.selection_cleared.disconnect(_on_selection_manager_cleared)
+
+	_selection_manager = manager
+
+	# Connect to new manager
+	if _selection_manager:
+		_selection_manager.selection_changed.connect(_on_selection_manager_changed)
+		_selection_manager.selection_cleared.connect(_on_selection_manager_cleared)
+
+
+## Called when SelectionManager's selection changes
+## Updates UI to reflect the authoritative selection state
+func _on_selection_manager_changed(tiles: Array[Rect2], anchor: int) -> void:
+	# Update local state from SelectionManager (derived, not authoritative)
+	_selected_tiles = tiles.duplicate()
+	has_selection = tiles.size() > 0
+
+	# Update visual highlight
+	if has_selection:
+		# Update selected_tile_coords for highlight positioning
+		if _selected_tiles.size() > 0 and _tile_size.x > 0 and _tile_size.y > 0:
+			selected_tile_coords = Vector2i(
+				int(_selected_tiles[0].position.x / _tile_size.x),
+				int(_selected_tiles[0].position.y / _tile_size.y)
+			)
+		_update_selection_highlight()
+	else:
+		if selection_highlight:
+			selection_highlight.visible = false
+
+
+## Called when SelectionManager's selection is cleared
+## Hides the highlight and clears local derived state
+func _on_selection_manager_cleared() -> void:
+	_selected_tiles.clear()
+	has_selection = false
+	selected_tile_coords = Vector2i(-1, -1)
+	if selection_highlight:
+		selection_highlight.visible = false
+
+
+## Returns the currently loaded tileset texture (or null if none)
+## Used by AutotileTab to auto-populate new TileSets with atlas source
+func get_tileset_texture() -> Texture2D:
+	return current_texture
+
+
+## Updates the tileset texture and refreshes the Manual tab UI
+## Called when Auto-Tiling loads a TileSet with atlas texture
+func set_tileset_texture(texture: Texture2D) -> void:
+	if texture == current_texture:
+		return  # No change needed
+
+	current_texture = texture
+	if tileset_display:
+		tileset_display.texture = texture
+		if texture:
+			# Set TextureRect to actual texture size for pixel-perfect display
+			tileset_display.custom_minimum_size = texture.get_size()
+			tileset_display.size = texture.get_size()
+
+	# Reset selection when texture changes
+	clear_selection()
+
+
 
 
 ## Sets the active node and loads its settings into the UI
@@ -981,6 +1022,90 @@ func _on_mesh_mode_selected(index: int) -> void:
 
 	var mesh_mode_selected: GlobalConstants.MeshMode = index
 	mesh_mode_selection_changed.emit(mesh_mode_selected)
+
+
+## Handler for mesh mode depth spinbox value change
+## Emits signal for BOX/PRISM depth scaling (1.0 = default, no scaling)
+func _on_mesh_mode_depth_changed(value: float) -> void:
+	# Ignore if we're loading from node
+	if _is_loading_from_node:
+		return
+
+	mesh_mode_depth_changed.emit(value)
+
+
+## Handler for BOX/PRISM texture repeat checkbox toggle
+## Emits signal for plugin to update settings (DEFAULT = stripes, REPEAT = uniform)
+func _on_texture_repeat_checkbox_toggled(button_pressed: bool) -> void:
+	#print("[TEXTURE_REPEAT] UI: Checkbox toggled → button_pressed=%s" % button_pressed)
+
+	# Ignore if we're loading from node (prevents signal loops)
+	if _is_loading_from_node:
+		#print("[TEXTURE_REPEAT] UI: SKIPPED (loading from node)")
+		return
+
+	var mode: int = GlobalConstants.TextureRepeatMode.REPEAT if button_pressed else GlobalConstants.TextureRepeatMode.DEFAULT
+	#print("[TEXTURE_REPEAT] UI: Calculated mode=%d (0=DEFAULT, 1=REPEAT)" % mode)
+
+	# Save to per-node settings (single source of truth)
+	if current_node and current_node.settings:
+		current_node.settings.texture_repeat_mode = mode
+		#print("[TEXTURE_REPEAT] UI: Saved to settings.texture_repeat_mode=%d" % mode)
+	else:
+		pass  #print("[TEXTURE_REPEAT] UI: WARNING - current_node or settings is null!")
+
+	# Emit signal for plugin to update tile placement manager
+	#print("[TEXTURE_REPEAT] UI: Emitting texture_repeat_mode_changed(%d)" % mode)
+	texture_repeat_mode_changed.emit(mode)
+
+
+## Get current depth value from UI spinbox
+func get_current_depth() -> float:
+	if mesh_mode_depth_spin_box:
+		return mesh_mode_depth_spin_box.value
+	return 0.1  # Default
+
+
+## Set depth value in UI spinbox (used when switching nodes)
+func set_depth_value(depth: float) -> void:
+	if mesh_mode_depth_spin_box:
+		_is_loading_from_node = true
+		mesh_mode_depth_spin_box.value = depth
+		_is_loading_from_node = false
+
+
+## Get current texture repeat mode from UI checkbox
+## Returns GlobalConstants.TextureRepeatMode value
+func get_texture_repeat_mode() -> int:
+	if box_texture_repeat_checkbox:
+		return GlobalConstants.TextureRepeatMode.REPEAT if box_texture_repeat_checkbox.button_pressed else GlobalConstants.TextureRepeatMode.DEFAULT
+	return GlobalConstants.TextureRepeatMode.DEFAULT
+
+
+## Set texture repeat mode in UI checkbox (used when switching nodes)
+func set_texture_repeat_mode(mode: int) -> void:
+	if box_texture_repeat_checkbox:
+		_is_loading_from_node = true
+		box_texture_repeat_checkbox.button_pressed = (mode == GlobalConstants.TextureRepeatMode.REPEAT)
+		_is_loading_from_node = false
+
+
+## Handler for AutoTile mesh mode dropdown
+## Maps dropdown index to correct MeshMode value (index 1 → BOX_MESH value 2)
+func _on_autotile_mesh_mode_selected(index: int) -> void:
+	# Ignore if we're loading from node
+	if _is_loading_from_node:
+		return
+
+	# Map dropdown index to actual MeshMode value
+	var mesh_mode: int = AUTOTILE_MESH_MODE_MAP[index] if index < AUTOTILE_MESH_MODE_MAP.size() else GlobalConstants.MeshMode.FLAT_SQUARE
+
+	# Save to node settings (single source of truth)
+	if current_node and current_node.settings:
+		current_node.settings.autotile_mesh_mode = mesh_mode
+
+	# Emit signal with correct MeshMode value
+	autotile_mesh_mode_changed.emit(mesh_mode)
 
 func _on_grid_size_value_changed(new_value: float) -> void:
 	#print("DEBUG: _on_grid_size_value_changed called: new_value=", new_value, ", _is_loading_from_node=", _is_loading_from_node, ", current_node=", current_node != null)
