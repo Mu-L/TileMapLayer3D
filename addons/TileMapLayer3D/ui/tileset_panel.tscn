@@ -211,16 +211,15 @@ layout_mode = 2
 layout_mode = 2
 text = "Tile Placement controls"
 
-[node name="TileModeButtons" type="FlowContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls"]
+[node name="TileModeButtons" type="VBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls"]
 layout_mode = 2
-vertical = true
 
 [node name="MeshHBoxCont" type="HBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons"]
 layout_mode = 2
 
 [node name="MeshModeLabel" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/MeshHBoxCont"]
 layout_mode = 2
-text = "Mesh Type"
+text = "Type"
 
 [node name="MeshModeDropdown" type="OptionButton" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/MeshHBoxCont"]
 unique_name_in_owner = true
@@ -236,8 +235,44 @@ popup/item_2/id = 2
 popup/item_3/text = "PRISM_MESH"
 popup/item_3/id = 3
 
+[node name="MeshModeDepthLbl" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/MeshHBoxCont"]
+layout_mode = 2
+text = "Depth"
+
+[node name="MeshModeDepthSpinBox" type="SpinBox" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/MeshHBoxCont"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.1
+max_value = 1.0
+step = 0.1
+value = 0.1
+
+[node name="SpriteMeshHboxCont" type="HBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons"]
+layout_mode = 2
+
+[node name="GenerateSpriteMeshButton" type="Button" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/SpriteMeshHboxCont"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Create a SpriteMesh object based on the selected tiles"
+text = "Create SpriteMesh"
+
+[node name="SpriteMeshDetph" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/SpriteMeshHboxCont"]
+visible = false
+layout_mode = 2
+text = "Depth:"
+
+[node name="SpriteMeshDepthSpinBox" type="SpinBox" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/SpriteMeshHboxCont"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+min_value = 0.1
+max_value = 50.0
+step = 0.1
+value = 1.0
+
 [node name="CursorPositionLabel" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls"]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
 text = "Cursor: (0, 0, 0)"
 horizontal_alignment = 1
@@ -352,6 +387,19 @@ popup/item_0/id = 0
 popup/item_1/text = "BOX_MESH"
 popup/item_1/id = 1
 
+[node name="AutoTileDetph" type="Label" parent="TabContainer/Auto_Tiling/AutotileMargin/AutotileMainVBox/MeshHBoxCont"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Box Depth:"
+
+[node name="AutoTileDetphSpinBox" type="SpinBox" parent="TabContainer/Auto_Tiling/AutotileMargin/AutotileMainVBox/MeshHBoxCont"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.1
+max_value = 1.0
+step = 0.1
+value = 1.0
+
 [node name="HSeparator2" type="HSeparator" parent="TabContainer/Auto_Tiling/AutotileMargin/AutotileMainVBox"]
 layout_mode = 2
 
@@ -380,7 +428,7 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 0)
 layout_mode = 2
 tooltip_text = "Choose terrain color"
-color = Color(0.31975135, 0.43414348, 0.6679376, 1)
+color = Color(0.32342044, 0.8447664, 0.66067624, 1)
 
 [node name="TerrainButtonsRow" type="HBoxContainer" parent="TabContainer/Auto_Tiling/AutotileMargin/AutotileMainVBox"]
 layout_mode = 2
@@ -411,6 +459,7 @@ autowrap_mode = 2
 
 [node name="AutotileLoadDialog" type="FileDialog" parent="TabContainer/Auto_Tiling"]
 unique_name_in_owner = true
+oversampling_override = 1.0
 title = "Open a File"
 initial_position = 2
 ok_button_text = "Open"
@@ -420,6 +469,7 @@ filters = PackedStringArray("*.tres ; TileSet Resource")
 
 [node name="AutotileSaveDialog" type="FileDialog" parent="TabContainer/Auto_Tiling"]
 unique_name_in_owner = true
+oversampling_override = 1.0
 title = "Save TileSet"
 initial_position = 2
 ok_button_text = "Save"
@@ -439,10 +489,7 @@ layout_mode = 2
 layout_mode = 2
 text = "Collision:"
 
-[node name="HBoxContainer" type="FlowContainer" parent="TabContainer/Export_Collision/CollisionControls"]
-layout_mode = 2
-
-[node name="MarginContainer" type="MarginContainer" parent="TabContainer/Export_Collision/CollisionControls/HBoxContainer"]
+[node name="MarginContainer" type="MarginContainer" parent="TabContainer/Export_Collision/CollisionControls"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/margin_left = 5
@@ -450,23 +497,84 @@ theme_override_constants/margin_top = 2
 theme_override_constants/margin_right = 5
 theme_override_constants/margin_bottom = 2
 
-[node name="HBoxContainer" type="HBoxContainer" parent="TabContainer/Export_Collision/CollisionControls/HBoxContainer/MarginContainer"]
+[node name="HBoxContainer2" type="VBoxContainer" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer"]
 layout_mode = 2
 
-[node name="CreateCollisionBtn" type="Button" parent="TabContainer/Export_Collision/CollisionControls/HBoxContainer/MarginContainer/HBoxContainer"]
+[node name="CreateCollisionHboxCont" type="HBoxContainer" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2"]
+layout_mode = 2
+
+[node name="CollisionGenHboxContainer" type="HBoxContainer" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/CreateCollisionHboxCont"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CreateCollisionBtn" type="Button" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/CreateCollisionHboxCont/CollisionGenHboxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Create Collision
 "
 
-[node name="CollisionLabel" type="Label" parent="TabContainer/Export_Collision/CollisionControls/HBoxContainer/MarginContainer/HBoxContainer"]
+[node name="VSeparator2" type="VSeparator" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/CreateCollisionHboxCont"]
+custom_minimum_size = Vector2(5, 0)
+layout_mode = 2
+
+[node name="HBoxContainer2" type="HBoxContainer" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/CreateCollisionHboxCont"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ClearCollisionsButton" type="Button" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/CreateCollisionHboxCont/HBoxContainer2"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Clear Collisions"
+
+[node name="SaveCollisionOptions" type="HBoxContainer" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CollisionOptionsHboxCont" type="HBoxContainer" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CollisionAlphaLabel" type="Label" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions/CollisionOptionsHboxCont"]
 layout_mode = 2
 text = "AlphaAware:"
 
-[node name="CollisionCheckBox" type="CheckBox" parent="TabContainer/Export_Collision/CollisionControls/HBoxContainer/MarginContainer/HBoxContainer"]
+[node name="CollisionAlphaCheckBox" type="CheckBox" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions/CollisionOptionsHboxCont"]
 unique_name_in_owner = true
 layout_mode = 2
+button_pressed = true
+
+[node name="VSeparator" type="VSeparator" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions/CollisionOptionsHboxCont"]
+custom_minimum_size = Vector2(5, 0)
+layout_mode = 2
+
+[node name="CollisionBackFaceLable" type="Label" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions/CollisionOptionsHboxCont"]
+layout_mode = 2
+text = "Backface Collision:"
+
+[node name="BackfaceCollisionCheckBox" type="CheckBox" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions/CollisionOptionsHboxCont"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+
+[node name="VSeparator" type="VSeparator" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions"]
+custom_minimum_size = Vector2(5, 0)
+layout_mode = 2
+
+[node name="SaveExternal" type="HBoxContainer" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SaveColliSionLabel" type="Label" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions/SaveExternal"]
+layout_mode = 2
+text = "Save as external .res (Binary)
+    [Large size reduction]"
+
+[node name="SaveCollisionExternally" type="CheckBox" parent="TabContainer/Export_Collision/CollisionControls/MarginContainer/HBoxContainer2/SaveCollisionOptions/SaveExternal"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
 
 [node name="HSeparator5" type="HSeparator" parent="TabContainer/Export_Collision"]
 layout_mode = 2
@@ -532,10 +640,9 @@ theme_override_constants/margin_top = 2
 theme_override_constants/margin_right = 5
 theme_override_constants/margin_bottom = 2
 
-[node name="DebugButtonsGrid" type="GridContainer" parent="TabContainer/Other/DebugOptions/MarginContainer"]
+[node name="DebugButtonsGrid" type="VBoxContainer" parent="TabContainer/Other/DebugOptions/MarginContainer"]
 layout_mode = 2
 size_flags_vertical = 3
-columns = 2
 
 [node name="ShowDebugInfo" type="Button" parent="TabContainer/Other/DebugOptions/MarginContainer/DebugButtonsGrid"]
 unique_name_in_owner = true
@@ -551,6 +658,11 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 text = "Clear all tiles"
+
+[node name="BoxTextureRepeatCheckbox" type="CheckBox" parent="TabContainer/Other/DebugOptions/MarginContainer/DebugButtonsGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Repeat Texture (Box/Prism Meshes)"
 
 [node name="LoadTextureDialog" type="FileDialog" parent="."]
 unique_name_in_owner = true

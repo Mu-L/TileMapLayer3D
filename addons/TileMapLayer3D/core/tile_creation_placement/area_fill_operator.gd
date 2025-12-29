@@ -178,14 +178,18 @@ func complete(
 		cancel()
 		return -1
 
-	# Calculate tile count for confirmation
-	var positions: Array[Vector3] = GlobalUtil.get_grid_positions_in_area(min_pos, max_pos, orientation)
+	# Calculate tile count for confirmation (with snap size support)
+	var snap_size: float = _placement_manager.grid_snap_size if _placement_manager else 1.0
+	var positions: Array[Vector3] = GlobalUtil.get_grid_positions_in_area_with_snap(
+		min_pos, max_pos, orientation, snap_size
+	)
 	var tile_count: int = positions.size()
 
 	# Check if we need user confirmation for large areas
 	if tile_count > GlobalConstants.AREA_FILL_CONFIRM_THRESHOLD:
 		# TODO: Add confirmation dialog in polish phase
-		push_warning("TileMapLayer3D: Large area fill (%d tiles) - consider adding confirmation" % tile_count)
+		pass
+		# push_warning("TileMapLayer3D: Large area fill (%d tiles) - consider adding confirmation" % tile_count)
 
 	# Perform fill or erase via callback
 	var result: int = -1

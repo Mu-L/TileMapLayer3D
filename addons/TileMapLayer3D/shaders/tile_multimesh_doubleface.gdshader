@@ -17,24 +17,25 @@ void vertex() {
 void fragment() {
 	vec2 uv_min = uv_rect_data.rg;
 	vec2 uv_max = uv_rect_data.ba;
-	
+
 	vec2 flipped_uv = vec2(UV.x, 1.0 - UV.y);
 	vec2 remapped_uv = mix(uv_min, uv_max, flipped_uv);
-	
+
 	vec4 tex_color = use_nearest_texture
 			? texture(albedo_texture_nearest, remapped_uv)
 			: texture(albedo_texture_linear, remapped_uv);
-	
+
 	//   discard must happen BEFORE any other assignments
 	if (tex_color.a < alpha_threshold) {
 		discard;  // ← This is what makes shadows work!
 	}
-	
-	if (debug_show_backfaces && !FRONT_FACING) {
-		ALBEDO = vec3(1.0, 0.0, 0.0); //vec3(0.5, 0.5, 0.5);
+	//Always renders both faces without backface debug (as we use cull_disabled)
+	ALBEDO = albedo_color.rgb * tex_color.rgb;
 
-	} else {
-		ALBEDO = albedo_color.rgb * tex_color.rgb;
-	}
-	
+	//if (debug_show_backfaces && !FRONT_FACING) {
+		//ALBEDO = vec3(1.0, 0.0, 0.0);
+//
+	//} else {
+		//ALBEDO = albedo_color.rgb * tex_color.rgb;
+	//}
 }

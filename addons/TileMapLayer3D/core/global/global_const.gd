@@ -215,7 +215,13 @@ const PREVIEW_UPDATE_INTERVAL: float = 0.033
 
 ##  Movement threshold to reduce preview updates (5-10x fewer updates)
 const PREVIEW_MIN_MOVEMENT: float = 1.0  # Minimum pixels to trigger preview update
-const PREVIEW_MIN_GRID_MOVEMENT: float = 1.0  # Minimum grid units to trigger preview update
+
+## Preview update grid movement threshold multiplier
+## Multiplied by current snap size to determine minimum grid movement
+## Example: With 0.5 snap, threshold = 0.5 × 1.0 = 0.5 grid units
+## Example: With 1.0 snap, threshold = 1.0 × 1.0 = 1.0 grid units (same as before)
+## Default: 1.0 (ensures perfect backward compatibility with existing 1.0 snap behavior)
+const PREVIEW_GRID_MOVEMENT_MULTIPLIER: float = 1.0
 
 # =============================================================================
 # PLACEMENT MODE NAMES (Debug/UI Display)
@@ -303,6 +309,13 @@ const TILT_POSITION_OFFSET_FACTOR: float = 0.5
 ##   → projected dimension = 1.414 × cos(45°) ≈ 1.0m (perfect grid fit)
 const DIAGONAL_SCALE_FACTOR: float = 1.41421356237  # sqrt(2.0)
 
+## Default orientation offset: Applied to ALL flat tiles based on orientation
+## Pushes each tile slightly along its surface normal to prevent Z-fighting
+## when opposite-facing tiles occupy the same grid position.
+## Value in world units - extremely small (0.1mm) to be imperceptible
+## Only applies to FLAT_SQUARE and FLAT_TRIANGULE mesh types
+const FLAT_TILE_ORIENTATION_OFFSET: float = 0.0001
+
 #endregion
 # ==============================================================================
 #region TILE DEFAULT VALUES and UI OPTIONS (UI & Configuration)
@@ -370,7 +383,17 @@ const CHUNK_MAX_TILES: int = 1000
 
 ## Custom AABB for MultiMesh chunks (ensures tiles are always visible)
 ## Default: AABB(Vector3(-500, -10, -500), Vector3(1000, 20, 1000))
+## NOTE: This is the LEGACY global AABB. New spatial chunking uses per-region AABB.
 const CHUNK_CUSTOM_AABB: AABB = AABB(Vector3(-500, -10, -500), Vector3(1000, 20, 1000))
+
+## Spatial region size for chunk partitioning (world units)
+## Tiles within the same NxNxN cube share the same chunk (up to CHUNK_MAX_TILES capacity)
+## This enables better frustum culling and localized rendering updates.
+## Default: 50.0 units (50x50x50 regions)
+const CHUNK_REGION_SIZE: float = 50.0
+
+## Half of the region size, used for AABB center calculations
+const CHUNK_REGION_HALF_SIZE: float = 25.0
 
 # =============================================================================
 # RENDER PRIORITY CONSTANTS - SINGLE SOURCE OF TRUTH
@@ -426,12 +449,33 @@ const DEFAULT_MESH_MODE: int = 0  # Start with square mode
 
 ## Box/Prism mesh thickness as fraction of grid_size
 ## Used by BOX_MESH and PRISM_MESH modes
-const MESH_THICKNESS_RATIO: float = 0.05
+const MESH_THICKNESS_RATIO: float = 1.0
 
 ## Width of edge stripe for BOX/PRISM side faces (as fraction of tile UV 0-1)
 ## Side faces sample a thin column/row from the edge of the front texture
 ## 0.1 = 10% of tile texture width/height
 const MESH_SIDE_UV_STRIPE_RATIO: float = 0.1
+
+## Controls UV mapping mode for BOX_MESH and PRISM_MESH side faces
+## DEFAULT = Edge stripes on side faces (current behavior)
+## REPEAT = All faces use full texture (uniform UVs)
+enum TextureRepeatMode {
+	DEFAULT = 0,  # Side faces sample edge stripes from texture
+	REPEAT = 1    # All faces use full tile texture (uniform)
+}
+
+#endregion
+# ==============================================================================
+#region BAKE MODE SYSTEM
+# ==============================================================================
+
+## Controls how tiles are baked into static meshes
+## Used by TileMeshMerger for mesh baking operations
+enum BakeMode {
+	NORMAL = 0,         # Standard merge without alpha detection
+	ALPHA_AWARE = 1,    # Custom alpha detection (excludes transparent pixels)
+	STREAMING = 2       # For large tile counts (10,000+)
+}
 
 #endregion
 # ==============================================================================

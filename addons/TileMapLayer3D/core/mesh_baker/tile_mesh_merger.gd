@@ -36,7 +36,39 @@ const VERTEX_BATCH_SIZE: int = 10000
 const DEBUG_LOGGING: bool = false
 
 # ==============================================================================
-# MAIN MERGE FUNCTION
+# UNIFIED ENTRY POINT
+# ==============================================================================
+
+## Main entry point for all mesh baking operations
+## This is the SINGLE function that should be called for baking
+##
+## @param tile_map_layer: TileMapLayer3D node containing tiles to bake
+## @param options: Dictionary with optional keys:
+##   - alpha_aware: bool = false - Use alpha-aware baking (excludes transparent pixels)
+##   - streaming: bool = false - Use streaming mode for 10k+ tiles
+##   - progress_callback: Callable - Progress callback for streaming mode
+## @returns: Dictionary with keys:
+##   - success: bool - Whether bake succeeded
+##   - mesh: ArrayMesh - The baked mesh (if successful)
+##   - material: Material - The material to apply (if successful)
+##   - error: String - Error message (if failed)
+static func merge_tiles(
+	tile_map_layer: TileMapLayer3D,
+	options: Dictionary = {}
+) -> Dictionary:
+	var alpha_aware: bool = options.get("alpha_aware", false)
+	var streaming: bool = options.get("streaming", false)
+	var progress_callback: Callable = options.get("progress_callback", Callable())
+
+	if streaming:
+		return merge_tiles_streaming(tile_map_layer, progress_callback)
+	elif alpha_aware:
+		return _merge_alpha_aware(tile_map_layer)
+	else:
+		return merge_tiles_to_array_mesh(tile_map_layer)
+
+# ==============================================================================
+# MAIN MERGE FUNCTION (NORMAL MODE)
 # ==============================================================================
 
 ## Main merge function - returns dictionary with mesh and metadata
@@ -56,7 +88,7 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 		}
 
 	# Validation: Check has tiles to merge
-	if tile_map_layer.saved_tiles.is_empty():
+	if tile_map_layer.get_tile_count() == 0:
 		return {
 			"success": false,
 			"error": "No tiles to merge"
@@ -81,7 +113,8 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 	var total_vertices: int = 0
 	var total_indices: int = 0
 
-	for tile: TilePlacerData in tile_map_layer.saved_tiles:
+	for i in range(tile_map_layer.get_tile_count()):
+		var tile: TilePlacerData = tile_map_layer.get_tile_at(i)
 		match tile.mesh_mode:
 			GlobalConstants.MeshMode.FLAT_SQUARE:
 				total_vertices += 4
@@ -94,10 +127,10 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 				total_vertices += 24
 				total_indices += 36
 			GlobalConstants.MeshMode.PRISM_MESH:
-				# Prism has 3 triangular faces (top, bottom) + 3 rectangular sides
-				# Top: 3 verts, 3 indices; Bottom: 3 verts, 3 indices
-				# Sides: 3 quads = 12 verts, 18 indices
-				total_vertices += 18
+				# Prism: Top triangle (3 verts) + Bottom triangle (3 verts)
+				# + 3 side quads (6 verts each = 18 verts, 2 triangles each = 18 indices)
+				# Total: 24 vertices, 24 indices (8 triangles)
+				total_vertices += 24
 				total_indices += 24
 
 	#print("🔨 Merging %d tiles (%d vertices, %d indices)" % [
@@ -121,11 +154,12 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 	var index_offset: int = 0
 
 	# Process each tile
-	for tile_idx: int in range(tile_map_layer.saved_tiles.size()):
-		var tile: TilePlacerData = tile_map_layer.saved_tiles[tile_idx]
+	for tile_idx: int in range(tile_map_layer.get_tile_count()):
+		var tile: TilePlacerData = tile_map_layer.get_tile_at(tile_idx)
 
 		# Build transform for this tile using GlobalUtil (single source of truth)
 		# Uses saved transform params for data persistency
+		# Passes mesh_mode and depth_scale for proper BOX/PRISM scaling
 		var transform: Transform3D = GlobalUtil.build_tile_transform(
 			tile.grid_position,
 			tile.orientation,
@@ -135,7 +169,9 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 			tile.spin_angle_rad,
 			tile.tilt_angle_rad,
 			tile.diagonal_scale,
-			tile.tilt_offset_factor
+			tile.tilt_offset_factor,
+			tile.mesh_mode,
+			tile.depth_scale
 		)
 
 		#   Calculate exact UV coordinates from tile rect
@@ -144,12 +180,14 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 		var uv_rect_normalized: Rect2 = Rect2(uv_data.uv_min, uv_data.uv_max - uv_data.uv_min)
 
 		# Add geometry based on mesh mode
+		# Pass mesh_rotation and is_face_flipped for correct UV transformation
 		match tile.mesh_mode:
 			GlobalConstants.MeshMode.FLAT_SQUARE:
 				_add_square_to_arrays(
 					vertices, uvs, normals, indices,
 					vertex_offset, index_offset,
-					transform, uv_rect_normalized, grid_size
+					transform, uv_rect_normalized, grid_size,
+					tile.mesh_rotation, tile.is_face_flipped
 				)
 				vertex_offset += 4
 				index_offset += 6
@@ -167,7 +205,8 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 					transform, uv_rect_normalized, grid_size
 				)
 
-				# Copy to pre-allocated arrays
+				# Copy to pre-allocated arrays - UVs are already in atlas space from add_triangle_geometry
+				# No transform_uv_for_baking needed (matches alpha-aware mode behavior)
 				for i: int in range(3):
 					vertices[vertex_offset + i] = temp_verts[i]
 					uvs[vertex_offset + i] = temp_uvs[i]
@@ -180,25 +219,37 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 				index_offset += 3
 
 			GlobalConstants.MeshMode.BOX_MESH:
-				# For BOX_MESH, create the box mesh and extract geometry
-				var box_mesh: ArrayMesh = TileMeshGenerator.create_box_mesh(grid_size)
+				# For BOX_MESH, create base mesh - depth_scale is applied via transform
+				# Use texture_repeat_mode to select correct UV mapping (DEFAULT=stripes, REPEAT=full)
+				var box_mesh: ArrayMesh
+				if tile.texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT:
+					box_mesh = TileMeshGenerator.create_box_mesh_repeat(grid_size)
+				else:
+					box_mesh = TileMeshGenerator.create_box_mesh(grid_size)
 				var vert_count: int = _add_mesh_to_arrays(
 					vertices, uvs, normals, indices,
 					vertex_offset, index_offset,
-					transform, uv_rect_normalized, box_mesh
+					transform, uv_rect_normalized, box_mesh,
+					tile.mesh_rotation, tile.is_face_flipped
 				)
 				vertex_offset += 24
 				index_offset += 36
 
 			GlobalConstants.MeshMode.PRISM_MESH:
-				# For PRISM_MESH, create the prism mesh and extract geometry
-				var prism_mesh: ArrayMesh = TileMeshGenerator.create_prism_mesh(grid_size)
+				# For PRISM_MESH, create base mesh - depth_scale is applied via transform
+				# Use texture_repeat_mode to select correct UV mapping (DEFAULT=stripes, REPEAT=full)
+				var prism_mesh: ArrayMesh
+				if tile.texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT:
+					prism_mesh = TileMeshGenerator.create_prism_mesh_repeat(grid_size)
+				else:
+					prism_mesh = TileMeshGenerator.create_prism_mesh(grid_size)
 				var vert_count: int = _add_mesh_to_arrays(
 					vertices, uvs, normals, indices,
 					vertex_offset, index_offset,
-					transform, uv_rect_normalized, prism_mesh
+					transform, uv_rect_normalized, prism_mesh,
+					tile.mesh_rotation, tile.is_face_flipped
 				)
-				vertex_offset += 18
+				vertex_offset += 24
 				index_offset += 24
 
 		# Progress reporting for large merges (every 1000 tiles)
@@ -236,7 +287,7 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 		"mesh": array_mesh,
 		"material": material,
 		"stats": {
-			"tile_count": tile_map_layer.saved_tiles.size(),
+			"tile_count": tile_map_layer.get_tile_count(),
 			"vertex_count": total_vertices,
 			"triangle_count": total_indices / 3,
 			"merge_time_ms": elapsed,
@@ -258,6 +309,8 @@ static func merge_tiles_to_array_mesh(tile_map_layer: TileMapLayer3D) -> Diction
 ## @param transform: Complete tile transform (position + orientation + rotation)
 ## @param uv_rect: Normalized UV rectangle [0,1] range
 ## @param grid_size: Grid cell size for local vertex calculation
+## @param mesh_rotation: Tile rotation 0-3 (Q/E keys) for UV transformation
+## @param is_face_flipped: Whether tile is horizontally flipped (F key)
 static func _add_square_to_arrays(
 	vertices: PackedVector3Array,
 	uvs: PackedVector2Array,
@@ -267,7 +320,9 @@ static func _add_square_to_arrays(
 	i_offset: int,
 	transform: Transform3D,
 	uv_rect: Rect2,
-	grid_size: float
+	grid_size: float,
+	mesh_rotation: int = 0,
+	is_face_flipped: bool = false
 ) -> void:
 
 	var half: float = grid_size * 0.5
@@ -281,13 +336,13 @@ static func _add_square_to_arrays(
 		Vector3(-half, 0, half)    # 3: top-left
 	]
 
-	#   UV coordinates that exactly map to the tile's texture region
-	# Must correspond to vertex order for correct texture mapping
-	var tile_uvs: Array[Vector2] = [
-		uv_rect.position,                                    # 0: bottom-left UV
-		Vector2(uv_rect.end.x, uv_rect.position.y),         # 1: bottom-right UV
-		uv_rect.end,                                         # 2: top-right UV
-		Vector2(uv_rect.position.x, uv_rect.end.y)          # 3: top-left UV
+	# Local UV coordinates in [0,1] space for each vertex
+	# These will be transformed based on rotation/flip, then remapped to uv_rect
+	var local_uvs: Array[Vector2] = [
+		Vector2(0.0, 0.0),  # 0: bottom-left
+		Vector2(1.0, 0.0),  # 1: bottom-right
+		Vector2(1.0, 1.0),  # 2: top-right
+		Vector2(0.0, 1.0)   # 3: top-left
 	]
 
 	# Transform vertices to world space and set data
@@ -296,7 +351,21 @@ static func _add_square_to_arrays(
 
 	for i: int in range(4):
 		vertices[v_offset + i] = transform * local_verts[i]
-		uvs[v_offset + i] = tile_uvs[i]
+		# Apply rotation/flip directly (no Y-flip for flat tiles - matches alpha-aware mode)
+		var final_uv: Vector2 = local_uvs[i]
+		if is_face_flipped:
+			final_uv.x = 1.0 - final_uv.x
+		match mesh_rotation:
+			1:  # 90° CCW
+				final_uv = Vector2(final_uv.y, 1.0 - final_uv.x)
+			2:  # 180°
+				final_uv = Vector2(1.0 - final_uv.x, 1.0 - final_uv.y)
+			3:  # 270° CCW
+				final_uv = Vector2(1.0 - final_uv.y, final_uv.x)
+		uvs[v_offset + i] = Vector2(
+			uv_rect.position.x + final_uv.x * uv_rect.size.x,
+			uv_rect.position.y + final_uv.y * uv_rect.size.y
+		)
 		normals[v_offset + i] = normal
 
 	# Set indices for two triangles (counter-clockwise winding)
@@ -329,6 +398,8 @@ static func _add_square_to_arrays(
 ## @param transform: Complete tile transform (position + orientation + rotation)
 ## @param uv_rect: Normalized UV rectangle [0,1] range (for top face remapping)
 ## @param source_mesh: ArrayMesh to extract geometry from
+## @param mesh_rotation: Tile rotation 0-3 (Q/E keys) for UV transformation
+## @param is_face_flipped: Whether tile is horizontally flipped (F key)
 ## @returns: Number of vertices added
 static func _add_mesh_to_arrays(
 	vertices: PackedVector3Array,
@@ -339,7 +410,9 @@ static func _add_mesh_to_arrays(
 	i_offset: int,
 	transform: Transform3D,
 	uv_rect: Rect2,
-	source_mesh: ArrayMesh
+	source_mesh: ArrayMesh,
+	mesh_rotation: int = 0,
+	is_face_flipped: bool = false
 ) -> int:
 	if source_mesh.get_surface_count() == 0:
 		return 0
@@ -348,7 +421,18 @@ static func _add_mesh_to_arrays(
 	var src_verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var src_uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
 	var src_normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
-	var src_indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+
+	# Handle meshes without explicit indices (e.g., SurfaceTool without add_index calls)
+	var src_indices_raw = arrays[Mesh.ARRAY_INDEX]
+	var src_indices: PackedInt32Array
+	if src_indices_raw != null:
+		src_indices = src_indices_raw
+	else:
+		# Generate sequential indices for non-indexed meshes
+		src_indices = PackedInt32Array()
+		src_indices.resize(src_verts.size())
+		for i: int in range(src_verts.size()):
+			src_indices[i] = i
 
 	var vert_count: int = src_verts.size()
 	var idx_count: int = src_indices.size()
@@ -356,11 +440,12 @@ static func _add_mesh_to_arrays(
 	# Transform vertices to world space and copy data
 	for i: int in range(vert_count):
 		vertices[v_offset + i] = transform * src_verts[i]
-		# Remap UVs from [0,1] to tile's UV rect
+		# Transform UV based on rotation/flip, then remap to tile's UV rect
 		var src_uv: Vector2 = src_uvs[i]
+		var transformed_uv: Vector2 = GlobalUtil.transform_uv_for_baking(src_uv, mesh_rotation, is_face_flipped)
 		uvs[v_offset + i] = Vector2(
-			uv_rect.position.x + src_uv.x * uv_rect.size.x,
-			uv_rect.position.y + src_uv.y * uv_rect.size.y
+			uv_rect.position.x + transformed_uv.x * uv_rect.size.x,
+			uv_rect.position.y + transformed_uv.y * uv_rect.size.y
 		)
 		# Transform normal by the basis (rotation only, no translation)
 		normals[v_offset + i] = (transform.basis * src_normals[i]).normalized()
@@ -391,7 +476,7 @@ static func merge_tiles_streaming(
 	const CHUNK_SIZE: int = 5000  # Process in chunks
 
 	# Validation
-	if not tile_map_layer or tile_map_layer.saved_tiles.is_empty():
+	if not tile_map_layer or tile_map_layer.get_tile_count() == 0:
 		return {"success": false, "error": "No tiles to merge"}
 
 	var start_time: int = Time.get_ticks_msec()
@@ -402,7 +487,7 @@ static func merge_tiles_streaming(
 	var surface_tool: SurfaceTool = SurfaceTool.new()
 	surface_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 
-	var tile_count: int = tile_map_layer.saved_tiles.size()
+	var tile_count: int = tile_map_layer.get_tile_count()
 	var chunks: int = (tile_count + CHUNK_SIZE - 1) / CHUNK_SIZE
 
 	#print("🔨 Streaming merge of %d tiles in %d chunks" % [tile_count, chunks])
@@ -414,9 +499,10 @@ static func merge_tiles_streaming(
 
 		# Process chunk
 		for i: int in range(start_idx, end_idx):
-			var tile: TilePlacerData = tile_map_layer.saved_tiles[i]
+			var tile: TilePlacerData = tile_map_layer.get_tile_at(i)
 
 			# Build transform using saved transform params for data persistency
+			# Passes mesh_mode and depth_scale for proper BOX/PRISM scaling
 			var transform: Transform3D = GlobalUtil.build_tile_transform(
 				tile.grid_position,
 				tile.orientation,
@@ -426,7 +512,9 @@ static func merge_tiles_streaming(
 				tile.spin_angle_rad,
 				tile.tilt_angle_rad,
 				tile.diagonal_scale,
-				tile.tilt_offset_factor
+				tile.tilt_offset_factor,
+				tile.mesh_mode,
+				tile.depth_scale
 			)
 
 			# Calculate UVs using GlobalUtil (single source of truth)
@@ -434,15 +522,18 @@ static func merge_tiles_streaming(
 			var uv_rect_normalized: Rect2 = Rect2(uv_data.uv_min, uv_data.uv_max - uv_data.uv_min)
 
 			# Add geometry based on type
+			# Note: depth_scale is already applied via transform, don't pass to mesh generators
+			# Pass mesh_rotation and is_face_flipped for correct UV transformation
+			# Pass texture_repeat_mode for BOX/PRISM to select correct UV mapping
 			match tile.mesh_mode:
 				GlobalConstants.MeshMode.FLAT_SQUARE:
-					_add_square_to_surface_tool(surface_tool, transform, uv_rect_normalized, grid_size)
+					_add_square_to_surface_tool(surface_tool, transform, uv_rect_normalized, grid_size, tile.mesh_rotation, tile.is_face_flipped)
 				GlobalConstants.MeshMode.FLAT_TRIANGULE:
-					_add_triangle_to_surface_tool(surface_tool, transform, uv_rect_normalized, grid_size)
+					_add_triangle_to_surface_tool(surface_tool, transform, uv_rect_normalized, grid_size, tile.mesh_rotation, tile.is_face_flipped)
 				GlobalConstants.MeshMode.BOX_MESH:
-					_add_box_to_surface_tool(surface_tool, transform, uv_rect_normalized, grid_size)
+					_add_box_to_surface_tool(surface_tool, transform, uv_rect_normalized, grid_size, tile.mesh_rotation, tile.is_face_flipped, tile.texture_repeat_mode)
 				GlobalConstants.MeshMode.PRISM_MESH:
-					_add_prism_to_surface_tool(surface_tool, transform, uv_rect_normalized, grid_size)
+					_add_prism_to_surface_tool(surface_tool, transform, uv_rect_normalized, grid_size, tile.mesh_rotation, tile.is_face_flipped, tile.texture_repeat_mode)
 
 			# Report progress
 			if progress_callback.is_valid() and i % 100 == 0:
@@ -493,29 +584,57 @@ static func _add_square_to_surface_tool(
 	st: SurfaceTool,
 	transform: Transform3D,
 	uv_rect: Rect2,
-	grid_size: float
+	grid_size: float,
+	mesh_rotation: int = 0,
+	is_face_flipped: bool = false
 ) -> void:
 
 	var half: float = grid_size * 0.5
 	var normal: Vector3 = transform.basis.y.normalized()
 
+	# Local UV coordinates in [0,1] space
+	var local_uvs: Array[Vector2] = [
+		Vector2(0.0, 0.0),  # 0: bottom-left
+		Vector2(1.0, 0.0),  # 1: bottom-right
+		Vector2(1.0, 1.0),  # 2: top-right
+		Vector2(0.0, 1.0)   # 3: top-left
+	]
+
+	# Apply rotation/flip directly (no Y-flip for flat tiles - matches alpha-aware mode)
+	var transformed_uvs: Array[Vector2] = []
+	for i: int in range(4):
+		var final_uv: Vector2 = local_uvs[i]
+		if is_face_flipped:
+			final_uv.x = 1.0 - final_uv.x
+		match mesh_rotation:
+			1:  # 90° CCW
+				final_uv = Vector2(final_uv.y, 1.0 - final_uv.x)
+			2:  # 180°
+				final_uv = Vector2(1.0 - final_uv.x, 1.0 - final_uv.y)
+			3:  # 270° CCW
+				final_uv = Vector2(1.0 - final_uv.y, final_uv.x)
+		transformed_uvs.append(Vector2(
+			uv_rect.position.x + final_uv.x * uv_rect.size.x,
+			uv_rect.position.y + final_uv.y * uv_rect.size.y
+		))
+
 	# Bottom-left
-	st.set_uv(uv_rect.position)
+	st.set_uv(transformed_uvs[0])
 	st.set_normal(normal)
 	st.add_vertex(transform * Vector3(-half, 0, -half))
 
 	# Bottom-right
-	st.set_uv(Vector2(uv_rect.end.x, uv_rect.position.y))
+	st.set_uv(transformed_uvs[1])
 	st.set_normal(normal)
 	st.add_vertex(transform * Vector3(half, 0, -half))
 
 	# Top-right
-	st.set_uv(uv_rect.end)
+	st.set_uv(transformed_uvs[2])
 	st.set_normal(normal)
 	st.add_vertex(transform * Vector3(half, 0, half))
 
 	# Top-left
-	st.set_uv(Vector2(uv_rect.position.x, uv_rect.end.y))
+	st.set_uv(transformed_uvs[3])
 	st.set_normal(normal)
 	st.add_vertex(transform * Vector3(-half, 0, half))
 
@@ -524,59 +643,112 @@ static func _add_triangle_to_surface_tool(
 	st: SurfaceTool,
 	transform: Transform3D,
 	uv_rect: Rect2,
-	grid_size: float
+	grid_size: float,
+	mesh_rotation: int = 0,
+	is_face_flipped: bool = false
 ) -> void:
 
 	var half_width: float = grid_size * 0.5
 	var half_height: float = grid_size * 0.5
 	var normal: Vector3 = transform.basis.y.normalized()
 
+	# Local UV coordinates in [0,1] space for triangle
+	var local_uvs: Array[Vector2] = [
+		Vector2(0.5, 0.0),  # Bottom point
+		Vector2(0.0, 1.0),  # Top-left
+		Vector2(1.0, 1.0)   # Top-right
+	]
+
+	# Apply rotation/flip directly (no Y-flip for flat tiles - matches alpha-aware mode)
+	var transformed_uvs: Array[Vector2] = []
+	for i: int in range(3):
+		var final_uv: Vector2 = local_uvs[i]
+		if is_face_flipped:
+			final_uv.x = 1.0 - final_uv.x
+		match mesh_rotation:
+			1:  # 90° CCW
+				final_uv = Vector2(final_uv.y, 1.0 - final_uv.x)
+			2:  # 180°
+				final_uv = Vector2(1.0 - final_uv.x, 1.0 - final_uv.y)
+			3:  # 270° CCW
+				final_uv = Vector2(1.0 - final_uv.y, final_uv.x)
+		transformed_uvs.append(Vector2(
+			uv_rect.position.x + final_uv.x * uv_rect.size.x,
+			uv_rect.position.y + final_uv.y * uv_rect.size.y
+		))
+
 	# Bottom point
-	st.set_uv(Vector2(uv_rect.position.x + uv_rect.size.x * 0.5, uv_rect.position.y))
+	st.set_uv(transformed_uvs[0])
 	st.set_normal(normal)
 	st.add_vertex(transform * Vector3(0.0, 0.0, -half_height))
 
 	# Top-left
-	st.set_uv(Vector2(uv_rect.position.x, uv_rect.end.y))
+	st.set_uv(transformed_uvs[1])
 	st.set_normal(normal)
 	st.add_vertex(transform * Vector3(-half_width, 0.0, half_height))
 
 	# Top-right
-	st.set_uv(Vector2(uv_rect.end.x, uv_rect.end.y))
+	st.set_uv(transformed_uvs[2])
 	st.set_normal(normal)
 	st.add_vertex(transform * Vector3(half_width, 0.0, half_height))
 
 
 ## Helper for streaming - add box mesh to SurfaceTool
+## @param texture_repeat_mode: DEFAULT (edge stripes) or REPEAT (full texture on all faces)
 static func _add_box_to_surface_tool(
 	st: SurfaceTool,
 	transform: Transform3D,
 	uv_rect: Rect2,
-	grid_size: float
+	grid_size: float,
+	mesh_rotation: int = 0,
+	is_face_flipped: bool = false,
+	texture_repeat_mode: int = GlobalConstants.TextureRepeatMode.DEFAULT
 ) -> void:
-	# Generate box mesh and add its geometry to SurfaceTool
-	var box_mesh: ArrayMesh = TileMeshGenerator.create_box_mesh(grid_size)
-	_add_array_mesh_to_surface_tool(st, transform, uv_rect, box_mesh)
+	# Generate box mesh (depth_scale applied via transform) and add its geometry to SurfaceTool
+	# Use texture_repeat_mode to select correct UV mapping
+	var box_mesh: ArrayMesh
+	if texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT:
+		box_mesh = TileMeshGenerator.create_box_mesh_repeat(grid_size)
+	else:
+		box_mesh = TileMeshGenerator.create_box_mesh(grid_size)
+	_add_array_mesh_to_surface_tool(st, transform, uv_rect, box_mesh, mesh_rotation, is_face_flipped)
 
 
 ## Helper for streaming - add prism mesh to SurfaceTool
+## @param texture_repeat_mode: DEFAULT (edge stripes) or REPEAT (full texture on all faces)
 static func _add_prism_to_surface_tool(
 	st: SurfaceTool,
 	transform: Transform3D,
 	uv_rect: Rect2,
-	grid_size: float
+	grid_size: float,
+	mesh_rotation: int = 0,
+	is_face_flipped: bool = false,
+	texture_repeat_mode: int = GlobalConstants.TextureRepeatMode.DEFAULT
 ) -> void:
-	# Generate prism mesh and add its geometry to SurfaceTool
-	var prism_mesh: ArrayMesh = TileMeshGenerator.create_prism_mesh(grid_size)
-	_add_array_mesh_to_surface_tool(st, transform, uv_rect, prism_mesh)
+	# Generate prism mesh (depth_scale applied via transform) and add its geometry to SurfaceTool
+	# Use texture_repeat_mode to select correct UV mapping
+	var prism_mesh: ArrayMesh
+	if texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT:
+		prism_mesh = TileMeshGenerator.create_prism_mesh_repeat(grid_size)
+	else:
+		prism_mesh = TileMeshGenerator.create_prism_mesh(grid_size)
+	_add_array_mesh_to_surface_tool(st, transform, uv_rect, prism_mesh, mesh_rotation, is_face_flipped)
 
 
 ## Helper to add an ArrayMesh's geometry to a SurfaceTool
+## @param st: SurfaceTool to add geometry to
+## @param transform: Complete tile transform (position + orientation + rotation)
+## @param uv_rect: Normalized UV rectangle [0,1] range
+## @param source_mesh: ArrayMesh to extract geometry from
+## @param mesh_rotation: Tile rotation 0-3 (Q/E keys) for UV transformation
+## @param is_face_flipped: Whether tile is horizontally flipped (F key)
 static func _add_array_mesh_to_surface_tool(
 	st: SurfaceTool,
 	transform: Transform3D,
 	uv_rect: Rect2,
-	source_mesh: ArrayMesh
+	source_mesh: ArrayMesh,
+	mesh_rotation: int = 0,
+	is_face_flipped: bool = false
 ) -> void:
 	if source_mesh.get_surface_count() == 0:
 		return
@@ -588,11 +760,12 @@ static func _add_array_mesh_to_surface_tool(
 
 	# Add each vertex with transformed position and remapped UVs
 	for i: int in range(src_verts.size()):
-		# Remap UVs from [0,1] to tile's UV rect
+		# Transform UV based on rotation/flip, then remap to tile's UV rect
 		var src_uv: Vector2 = src_uvs[i]
+		var transformed_uv: Vector2 = GlobalUtil.transform_uv_for_baking(src_uv, mesh_rotation, is_face_flipped)
 		var remapped_uv: Vector2 = Vector2(
-			uv_rect.position.x + src_uv.x * uv_rect.size.x,
-			uv_rect.position.y + src_uv.y * uv_rect.size.y
+			uv_rect.position.x + transformed_uv.x * uv_rect.size.x,
+			uv_rect.position.y + transformed_uv.y * uv_rect.size.y
 		)
 		st.set_uv(remapped_uv)
 
@@ -602,3 +775,188 @@ static func _add_array_mesh_to_surface_tool(
 
 		# Transform vertex to world space
 		st.add_vertex(transform * src_verts[i])
+
+
+# ==============================================================================
+# ALPHA-AWARE MERGE
+# ==============================================================================
+
+## Alpha-aware baking: Custom alpha detection (excludes transparent pixels)
+## Uses AlphaMeshGenerator to create geometry that follows the sprite's opaque regions
+##
+## @param tile_map_layer: TileMapLayer3D node containing tiles to merge
+## @returns: Dictionary with keys:
+##   - success: bool - Whether merge succeeded
+##   - mesh: ArrayMesh - The merged mesh (if successful)
+##   - material: Material - The material to apply (if successful)
+##   - error: String - Error message (if failed)
+static func _merge_alpha_aware(tile_map_layer: TileMapLayer3D) -> Dictionary:
+	var start_time: int = Time.get_ticks_msec()
+
+	# Get atlas texture
+	var atlas_texture: Texture2D = tile_map_layer.tileset_texture
+	if not atlas_texture:
+		return {"success": false, "error": "No tileset texture"}
+
+	var atlas_size: Vector2 = atlas_texture.get_size()
+	var grid_size: float = tile_map_layer.grid_size
+
+	# Pre-allocate arrays
+	var vertices: PackedVector3Array = PackedVector3Array()
+	var uvs: PackedVector2Array = PackedVector2Array()
+	var normals: PackedVector3Array = PackedVector3Array()
+	var indices: PackedInt32Array = PackedInt32Array()
+
+	var tiles_processed: int = 0
+	var total_vertices: int = 0
+
+	# Process each tile
+	for tile_idx: int in range(tile_map_layer.get_tile_count()):
+		var tile: TilePlacerData = tile_map_layer.get_tile_at(tile_idx)
+		# Build transform using saved transform params for data persistency
+		# Passes mesh_mode and depth_scale for proper BOX/PRISM scaling
+		var transform: Transform3D = GlobalUtil.build_tile_transform(
+			tile.grid_position,
+			tile.orientation,
+			tile.mesh_rotation,
+			grid_size,
+			tile.is_face_flipped,
+			tile.spin_angle_rad,
+			tile.tilt_angle_rad,
+			tile.diagonal_scale,
+			tile.tilt_offset_factor,
+			tile.mesh_mode,
+			tile.depth_scale
+		)
+
+		# Normalize UV rect using GlobalUtil (single source of truth)
+		var uv_data: Dictionary = GlobalUtil.calculate_normalized_uv(tile.uv_rect, atlas_size)
+		var uv_rect_normalized: Rect2 = Rect2(uv_data.uv_min, uv_data.uv_max - uv_data.uv_min)
+
+		match tile.mesh_mode:
+			GlobalConstants.MeshMode.FLAT_TRIANGULE:
+				# Add standard triangle geometry using shared utility
+				GlobalUtil.add_triangle_geometry(
+					vertices, uvs, normals, indices,
+					transform, uv_rect_normalized, grid_size
+				)
+				tiles_processed += 1
+				total_vertices += 3
+
+			GlobalConstants.MeshMode.BOX_MESH:
+				# Use full box mesh (same as regular merge) - includes all 6 faces
+				# This ensures proper collision and baked mesh generation
+				# depth_scale is applied via transform, not mesh generation
+				# Use texture_repeat_mode to select correct UV mapping
+				var box_mesh: ArrayMesh
+				if tile.texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT:
+					box_mesh = TileMeshGenerator.create_box_mesh_repeat(grid_size)
+				else:
+					box_mesh = TileMeshGenerator.create_box_mesh(grid_size)
+				var v_offset: int = vertices.size()
+				var i_offset: int = indices.size()
+
+				# Extend arrays for box geometry (24 vertices, 36 indices)
+				vertices.resize(v_offset + 24)
+				uvs.resize(v_offset + 24)
+				normals.resize(v_offset + 24)
+				indices.resize(i_offset + 36)
+
+				_add_mesh_to_arrays(
+					vertices, uvs, normals, indices,
+					v_offset, i_offset,
+					transform, uv_rect_normalized, box_mesh,
+					tile.mesh_rotation, tile.is_face_flipped
+				)
+
+				tiles_processed += 1
+				total_vertices += 24
+
+			GlobalConstants.MeshMode.PRISM_MESH:
+				# Use full prism mesh (same as regular merge) - includes all faces
+				# This ensures proper collision and baked mesh generation
+				# depth_scale is applied via transform, not mesh generation
+				# Use texture_repeat_mode to select correct UV mapping
+				var prism_mesh: ArrayMesh
+				if tile.texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT:
+					prism_mesh = TileMeshGenerator.create_prism_mesh_repeat(grid_size)
+				else:
+					prism_mesh = TileMeshGenerator.create_prism_mesh(grid_size)
+				var v_offset: int = vertices.size()
+				var i_offset: int = indices.size()
+
+				# Extend arrays for prism geometry (24 vertices, 24 indices)
+				vertices.resize(v_offset + 24)
+				uvs.resize(v_offset + 24)
+				normals.resize(v_offset + 24)
+				indices.resize(i_offset + 24)
+
+				_add_mesh_to_arrays(
+					vertices, uvs, normals, indices,
+					v_offset, i_offset,
+					transform, uv_rect_normalized, prism_mesh,
+					tile.mesh_rotation, tile.is_face_flipped
+				)
+
+				tiles_processed += 1
+				total_vertices += 24
+
+			GlobalConstants.MeshMode.FLAT_SQUARE, _:
+				# Generate alpha-aware geometry using BitMap API (for square tiles)
+				var geom: Dictionary = AlphaMeshGenerator.generate_alpha_mesh(
+					atlas_texture,
+					tile.uv_rect,
+					grid_size,
+					0.1,  # alpha_threshold
+					2.0   # epsilon (simplification)
+				)
+
+				if geom.success and geom.vertex_count > 0:
+					# Add geometry to arrays
+					var v_offset: int = vertices.size()
+
+					for i: int in range(geom.vertices.size()):
+						vertices.append(transform * geom.vertices[i])
+						uvs.append(geom.uvs[i])
+						normals.append(transform.basis * geom.normals[i])
+
+					for idx: int in geom.indices:
+						indices.append(v_offset + idx)
+
+					tiles_processed += 1
+					total_vertices += geom.vertex_count
+
+	# Validate results
+	if vertices.is_empty():
+		return {"success": false, "error": "Alpha-aware merge resulted in 0 vertices"}
+
+	# Create ArrayMesh using GlobalUtil
+	var array_mesh: ArrayMesh = GlobalUtil.create_array_mesh_from_arrays(
+		vertices, uvs, normals, indices,
+		PackedFloat32Array(),  # Auto-generate tangents
+		tile_map_layer.name + "_alpha_aware"
+	)
+
+	# Create material
+	var material: StandardMaterial3D = GlobalUtil.create_baked_mesh_material(
+		atlas_texture,
+		tile_map_layer.texture_filter_mode,
+		tile_map_layer.render_priority,
+		true,  # enable_alpha
+		true   # enable_toon_shading
+	)
+
+	array_mesh.surface_set_material(0, material)
+
+	var elapsed: int = Time.get_ticks_msec() - start_time
+
+	return {
+		"success": true,
+		"mesh": array_mesh,
+		"material": material,
+		"stats": {
+			"tile_count": tiles_processed,
+			"vertex_count": total_vertices,
+			"merge_time_ms": elapsed
+		}
+	}

@@ -13,6 +13,8 @@ class_name GlobalUtil
 
 # Cache shader resource for performance
 static var _cached_shader: Shader = null
+static var _cached_shader_double_sided: Shader = null
+
 
 
 ## Creates a StandardMaterial3D configured for unshaded rendering
@@ -56,20 +58,28 @@ static func create_unshaded_material(
 ##   2 = Linear (smooth)
 ##   3 = Linear Mipmap
 ## @returns: ShaderMaterial configured for tile rendering
-static func create_tile_material(texture: Texture2D, filter_mode: int = 0, render_priority: int = 0, debug_show_backfaces: bool = true) -> ShaderMaterial:
+static func create_tile_material(texture: Texture2D, filter_mode: int = 0, render_priority: int = 0, debug_show_red_backfaces: bool = true) -> ShaderMaterial:
 	# Cache shader resource for performance
 	if not _cached_shader:
 		_cached_shader = load("uid://huf0b1u2f55e")
+	
+	if not _cached_shader_double_sided:
+		_cached_shader_double_sided = load("uid://6otniuywb7v8")
 
 	var material: ShaderMaterial = ShaderMaterial.new()
-	material.shader = _cached_shader
+
+	if debug_show_red_backfaces:
+		material.shader = _cached_shader
+	else:
+		material.shader = _cached_shader_double_sided
+	# material.shader = _cached_shader
 	material.render_priority = render_priority
 
 	# Set texture parameters for both samplers (nearest and linear)
 	if texture:
 		material.set_shader_parameter("albedo_texture_nearest", texture)
 		material.set_shader_parameter("albedo_texture_linear", texture)
-		material.set_shader_parameter("debug_show_backfaces", debug_show_backfaces)
+		material.set_shader_parameter("debug_show_red_backfaces", debug_show_red_backfaces)
 
 
 		# Set the boolean to choose which sampler to use
@@ -142,26 +152,26 @@ enum TileOrientation {
 	# North walls tilt on Y-axis
 	WALL_NORTH_TILT_POS_Y = 10,
 	WALL_NORTH_TILT_NEG_Y = 11,
-	WALL_NORTH_TILT_POS_X = 12, #DEBUG - New item
-	WALL_NORTH_TILT_NEG_X = 13, #DEBUG - New item
+	WALL_NORTH_TILT_POS_X = 12, 
+	WALL_NORTH_TILT_NEG_X = 13, 
 
 	# South walls tilt on Y-axis
 	WALL_SOUTH_TILT_POS_Y = 14,
 	WALL_SOUTH_TILT_NEG_Y = 15,
-	WALL_SOUTH_TILT_POS_X = 16, #DEBUG - New item
-	WALL_SOUTH_TILT_NEG_X = 17, #DEBUG - New item
+	WALL_SOUTH_TILT_POS_X = 16, 
+	WALL_SOUTH_TILT_NEG_X = 17, 
 
 	# East
 	WALL_EAST_TILT_POS_X = 18,
 	WALL_EAST_TILT_NEG_X = 19,
-	WALL_EAST_TILT_POS_Y = 20, #DEBUG - New item
-	WALL_EAST_TILT_NEG_Y = 21, #DEBUG - New item
+	WALL_EAST_TILT_POS_Y = 20, 
+	WALL_EAST_TILT_NEG_Y = 21, 
 
 	# west
 	WALL_WEST_TILT_POS_X = 22,
 	WALL_WEST_TILT_NEG_X = 23,
-	WALL_WEST_TILT_POS_Y = 24, #DEBUG - New item
-	WALL_WEST_TILT_NEG_Y = 25, #DEBUG - New item
+	WALL_WEST_TILT_POS_Y = 24, 
+	WALL_WEST_TILT_NEG_Y = 25, 
 
 }
 
@@ -238,13 +248,13 @@ const ORIENTATION_DATA: Dictionary = {
 		"tilt_offset_axis": "z",
 	},
 
-	TileOrientation.WALL_NORTH_TILT_POS_X: { #DEBUG NEW ITEM TEST
+	TileOrientation.WALL_NORTH_TILT_POS_X: {
 		"base": TileOrientation.WALL_NORTH,
 		"scale": Vector3(1.0, 1.0, GlobalConstants.DIAGONAL_SCALE_FACTOR),
 		"depth_axis": "z",
 		"tilt_offset_axis": "z",
 	},
-	TileOrientation.WALL_NORTH_TILT_NEG_X: { #DEBUG NEW ITEM TEST
+	TileOrientation.WALL_NORTH_TILT_NEG_X: {
 		"base": TileOrientation.WALL_NORTH,
 		"scale": Vector3(1.0, 1.0, GlobalConstants.DIAGONAL_SCALE_FACTOR),
 		"depth_axis": "z",
@@ -270,13 +280,13 @@ const ORIENTATION_DATA: Dictionary = {
 		"depth_axis": "z",
 		"tilt_offset_axis": "z",
 	},
-	TileOrientation.WALL_SOUTH_TILT_POS_X: { #DEBUG NEW ITEM TEST
+	TileOrientation.WALL_SOUTH_TILT_POS_X: { 
 		"base": TileOrientation.WALL_SOUTH,
 		"scale": Vector3(1.0, 1.0, GlobalConstants.DIAGONAL_SCALE_FACTOR),
 		"depth_axis": "z",
 		"tilt_offset_axis": "z",
 	},
-	TileOrientation.WALL_SOUTH_TILT_NEG_X: { #DEBUG NEW ITEM TEST
+	TileOrientation.WALL_SOUTH_TILT_NEG_X: { 
 		"base": TileOrientation.WALL_SOUTH,
 		"scale": Vector3(1.0, 1.0, GlobalConstants.DIAGONAL_SCALE_FACTOR),
 		"depth_axis": "z",
@@ -302,13 +312,13 @@ const ORIENTATION_DATA: Dictionary = {
 		"depth_axis": "x",
 		"tilt_offset_axis": "x",
 	},
-	TileOrientation.WALL_EAST_TILT_POS_Y: {  #DEBUG - New item
+	TileOrientation.WALL_EAST_TILT_POS_Y: {  
 		"base": TileOrientation.WALL_EAST,
 		"scale": Vector3(GlobalConstants.DIAGONAL_SCALE_FACTOR, 1.0, 1.0),
 		"depth_axis": "x",
 		"tilt_offset_axis": "x",
 	},
-	TileOrientation.WALL_EAST_TILT_NEG_Y: {  #DEBUG - New item
+	TileOrientation.WALL_EAST_TILT_NEG_Y: {  
 		"base": TileOrientation.WALL_EAST,
 		"scale": Vector3(GlobalConstants.DIAGONAL_SCALE_FACTOR, 1.0, 1.0),
 		"depth_axis": "x",
@@ -335,13 +345,13 @@ const ORIENTATION_DATA: Dictionary = {
 		"depth_axis": "x",
 		"tilt_offset_axis": "x",
 	},
-	TileOrientation.WALL_WEST_TILT_POS_Y: {  #DEBUG - New item
+	TileOrientation.WALL_WEST_TILT_POS_Y: { 
 		"base": TileOrientation.WALL_WEST,
 		"scale": Vector3(GlobalConstants.DIAGONAL_SCALE_FACTOR, 1.0, 1.0),
 		"depth_axis": "x",
 		"tilt_offset_axis": "x",
 	},
-	TileOrientation.WALL_WEST_TILT_NEG_Y: {  #DEBUG - New item
+	TileOrientation.WALL_WEST_TILT_NEG_Y: {  
 		"base": TileOrientation.WALL_WEST,
 		"scale": Vector3(GlobalConstants.DIAGONAL_SCALE_FACTOR, 1.0, 1.0),
 		"depth_axis": "x",
@@ -370,33 +380,102 @@ const TILT_SEQUENCES: Dictionary = {
 		TileOrientation.WALL_NORTH,
 		TileOrientation.WALL_NORTH_TILT_POS_Y,
 		TileOrientation.WALL_NORTH_TILT_NEG_Y,
-		TileOrientation.WALL_NORTH_TILT_NEG_X, #DEBUG NEW ITEM TEST
-		TileOrientation.WALL_NORTH_TILT_POS_X, #DEBUG NEW ITEM TEST
+		TileOrientation.WALL_NORTH_TILT_NEG_X, 
+		TileOrientation.WALL_NORTH_TILT_POS_X, 
 
 	],
 	TileOrientation.WALL_SOUTH: [
 		TileOrientation.WALL_SOUTH,
 		TileOrientation.WALL_SOUTH_TILT_POS_Y,
 		TileOrientation.WALL_SOUTH_TILT_NEG_Y,
-		TileOrientation.WALL_SOUTH_TILT_POS_X, #DEBUG NEW ITEM TEST
-		TileOrientation.WALL_SOUTH_TILT_NEG_X #DEBUG NEW ITEM TEST
+		TileOrientation.WALL_SOUTH_TILT_POS_X, 
+		TileOrientation.WALL_SOUTH_TILT_NEG_X 
 	],
 	TileOrientation.WALL_EAST: [
 		TileOrientation.WALL_EAST,
 		TileOrientation.WALL_EAST_TILT_POS_X,
 		TileOrientation.WALL_EAST_TILT_NEG_X,
-		TileOrientation.WALL_EAST_TILT_POS_Y, #DEBUG NEW ITEM TEST
-		TileOrientation.WALL_EAST_TILT_NEG_Y #DEBUG NEW ITEM TEST
+		TileOrientation.WALL_EAST_TILT_POS_Y, 
+		TileOrientation.WALL_EAST_TILT_NEG_Y 
 	],
 	TileOrientation.WALL_WEST: [
 		TileOrientation.WALL_WEST,
 		TileOrientation.WALL_WEST_TILT_POS_X,
 		TileOrientation.WALL_WEST_TILT_NEG_X,
-		TileOrientation.WALL_WEST_TILT_POS_Y, #DEBUG NEW ITEM TEST
-		TileOrientation.WALL_WEST_TILT_NEG_Y #DEBUG NEW ITEM TEST
+		TileOrientation.WALL_WEST_TILT_POS_Y,
+		TileOrientation.WALL_WEST_TILT_NEG_Y
 	],
 }
 
+
+# =============================================================================
+# ORIENTATION CONFLICT DETECTION
+# =============================================================================
+# Functions to detect when two orientations occupy the same plane and would
+# visually overlap if placed at the same grid position.
+# Uses depth_axis from ORIENTATION_DATA - tiles with same depth_axis conflict.
+# =============================================================================
+
+## Returns the depth axis for an orientation ("x", "y", or "z")
+## Used to determine if two orientations conflict (same depth_axis = conflict)
+static func get_orientation_depth_axis(orientation: int) -> String:
+	var data: Dictionary = ORIENTATION_DATA.get(orientation, {})
+	return data.get("depth_axis", "")
+
+## Checks if two orientations conflict (occupy same plane, would overlap)
+## Only BASE orientations (0-5) can conflict - tilted tiles (6+) never conflict.
+## Examples: FLOOR/CEILING both have depth_axis "y", so they conflict.
+##           WALL_NORTH/WALL_SOUTH both have depth_axis "z", so they conflict.
+##           FLOOR + FLOOR_TILT_POS_X do NOT conflict (tilted tile at angle).
+static func orientations_conflict(orientation_a: int, orientation_b: int) -> bool:
+	if orientation_a == orientation_b:
+		return false  # Same orientation is handled separately (replacement)
+	# Only base orientations (0-5) can conflict - tilted tiles (6+) never conflict
+	if orientation_a > 5 or orientation_b > 5:
+		return false
+	var axis_a: String = get_orientation_depth_axis(orientation_a)
+	var axis_b: String = get_orientation_depth_axis(orientation_b)
+	return axis_a != "" and axis_a == axis_b
+
+## Returns the opposite-facing orientation for backface painting
+## Used to detect when painting on opposite walls/floors/ceilings
+## Only supports base orientations (0-5) - tilted tiles (6+) are not coplanar
+## @param orientation: Current tile orientation (0-25)
+## @returns: Opposite orientation, or -1 if no opposite (tilted orientations)
+static func get_opposite_orientation(orientation: int) -> int:
+	match orientation:
+		TileOrientation.FLOOR:        return TileOrientation.CEILING
+		TileOrientation.CEILING:      return TileOrientation.FLOOR
+		TileOrientation.WALL_NORTH:   return TileOrientation.WALL_SOUTH
+		TileOrientation.WALL_SOUTH:   return TileOrientation.WALL_NORTH
+		TileOrientation.WALL_EAST:    return TileOrientation.WALL_WEST
+		TileOrientation.WALL_WEST:    return TileOrientation.WALL_EAST
+		_: return -1  # Tilted orientations (6-25) are not coplanar - no backface painting
+
+## Calculates default orientation offset for flat tiles
+## Every flat tile gets a tiny offset along its surface normal
+## This prevents Z-fighting when opposite-facing tiles are at same position
+## @param orientation: Tile orientation (0-25)
+## @param mesh_mode: Mesh type (only applies to FLAT_SQUARE/FLAT_TRIANGULE)
+## @returns: Offset vector (Vector3.ZERO for non-flat tiles)
+static func calculate_flat_tile_offset(
+	orientation: int,
+	mesh_mode: int
+) -> Vector3:
+	# Only apply to flat mesh types (not BOX or PRISM which have thickness)
+	if mesh_mode != GlobalConstants.MeshMode.FLAT_SQUARE and \
+	   mesh_mode != GlobalConstants.MeshMode.FLAT_TRIANGULE:
+		return Vector3.ZERO
+
+	# Only apply if offset is enabled
+	if GlobalConstants.FLAT_TILE_ORIENTATION_OFFSET <= 0.0:
+		return Vector3.ZERO
+
+	# Get surface normal for this orientation (includes tilted orientations)
+	var normal: Vector3 = get_rotation_axis_for_orientation(orientation)
+
+	# Return offset along the normal
+	return normal * GlobalConstants.FLAT_TILE_ORIENTATION_OFFSET
 
 
 # =============================================================================
@@ -483,12 +562,12 @@ static func get_tile_rotation_basis(orientation: int, tilt_angle: float = 0.0) -
 			var tilt: Basis = Basis(Vector3.UP, -actual_tilt)
 			return tilt * wall_base
 
-		TileOrientation.WALL_NORTH_TILT_POS_X: #DEBUG NEW ITEM TEST
+		TileOrientation.WALL_NORTH_TILT_POS_X: 
 			var wall_base: Basis = Basis(Vector3(1, 0, 0), deg_to_rad(90))
 			var tilt: Basis = Basis(Vector3.RIGHT, actual_tilt)
 			return tilt * wall_base
 
-		TileOrientation.WALL_NORTH_TILT_NEG_X: #DEBUG NEW ITEM TEST
+		TileOrientation.WALL_NORTH_TILT_NEG_X:
 			var wall_base: Basis = Basis(Vector3(1, 0, 0), deg_to_rad(90))
 			var tilt: Basis = Basis(Vector3.RIGHT, -actual_tilt)
 			return tilt * wall_base
@@ -507,13 +586,13 @@ static func get_tile_rotation_basis(orientation: int, tilt_angle: float = 0.0) -
 			var tilt: Basis = Basis(Vector3.UP, -actual_tilt)
 			return tilt * wall_base
 
-		TileOrientation.WALL_SOUTH_TILT_POS_X: #DEBUG NEW ITEM TEST
+		TileOrientation.WALL_SOUTH_TILT_POS_X: 
 			var rotation_correction = Basis(Vector3(0, 1, 0), deg_to_rad(-180))
 			var wall_base: Basis = Basis(Vector3(1, 0, 0), deg_to_rad(-90)) * rotation_correction
 			var tilt: Basis = Basis(Vector3.RIGHT, actual_tilt)
 			return tilt * wall_base
 
-		TileOrientation.WALL_SOUTH_TILT_NEG_X: #DEBUG NEW ITEM TEST
+		TileOrientation.WALL_SOUTH_TILT_NEG_X:
 			var rotation_correction = Basis(Vector3(0, 1, 0), deg_to_rad(-180))
 			var wall_base: Basis = Basis(Vector3(1, 0, 0), deg_to_rad(-90)) * rotation_correction
 			var tilt: Basis = Basis(Vector3.RIGHT, -actual_tilt)
@@ -535,13 +614,13 @@ static func get_tile_rotation_basis(orientation: int, tilt_angle: float = 0.0) -
 			var tilt: Basis = Basis(Vector3.RIGHT, -actual_tilt)
 			return wall_base * tilt
 
-		TileOrientation.WALL_EAST_TILT_POS_Y: #DEBUG - New item
+		TileOrientation.WALL_EAST_TILT_POS_Y: 
 			var rotation_correction = Basis(Vector3(0, 1, 0), deg_to_rad(-90))
 			var wall_base: Basis = Basis(Vector3(0, 0, 1), PI / 2.0) * rotation_correction
 			var tilt: Basis = Basis(Vector3.FORWARD, actual_tilt)
 			return wall_base * tilt
 
-		TileOrientation.WALL_EAST_TILT_NEG_Y: #DEBUG - New item
+		TileOrientation.WALL_EAST_TILT_NEG_Y: 
 			var rotation_correction = Basis(Vector3(0, 1, 0), deg_to_rad(-90))
 			var wall_base: Basis = Basis(Vector3(0, 0, 1), PI / 2.0) * rotation_correction
 			var tilt: Basis = Basis(Vector3.FORWARD, -actual_tilt)
@@ -562,13 +641,13 @@ static func get_tile_rotation_basis(orientation: int, tilt_angle: float = 0.0) -
 			var tilt: Basis = Basis(Vector3.RIGHT, -actual_tilt)
 			return wall_base * tilt
 
-		TileOrientation.WALL_WEST_TILT_POS_Y: #DEBUG - New item
+		TileOrientation.WALL_WEST_TILT_POS_Y: 
 			var rotation_correction = Basis(Vector3(0, 1, 0), deg_to_rad(90))
 			var wall_base: Basis = Basis(Vector3(0, 0, 1), -PI / 2.0) * rotation_correction
 			var tilt: Basis = Basis(Vector3.FORWARD, actual_tilt)
 			return wall_base * tilt
 
-		TileOrientation.WALL_WEST_TILT_NEG_Y: #DEBUG - New item
+		TileOrientation.WALL_WEST_TILT_NEG_Y: 
 			var rotation_correction = Basis(Vector3(0, 1, 0), deg_to_rad(90))
 			var wall_base: Basis = Basis(Vector3(0, 0, 1), -PI / 2.0) * rotation_correction
 			var tilt: Basis = Basis(Vector3.FORWARD, -actual_tilt)
@@ -618,29 +697,48 @@ static func _get_snapped_cardinal_vector(direction_vector: Vector3) -> Vector3:
 		return Vector3(0, 0, sign(direction_vector.z))
 
 ## Returns non-uniform scale vector based on orientation
-## Uses ORIENTATION_DATA lookup table for 45° gap compensation
+## Uses ORIENTATION_DATA lookup table for 45° gap compensation and depth scaling.
 ##
 ## @param orientation: TileOrientation enum value
-## @param scale_factor: Optional custom scale factor (default: GlobalConstants.DIAGONAL_SCALE_FACTOR)
-## @returns: Vector3 scale (1.0 for unscaled axes, custom factor for scaled axis)
-static func get_scale_for_orientation(orientation: int, scale_factor: float = 0.0) -> Vector3:
+## @param scale_factor: Optional custom scale factor for diagonal tiles (0.0 = use GlobalConstants.DIAGONAL_SCALE_FACTOR)
+## @param mesh_mode: MeshMode enum value (0 = FLAT_SQUARE, 1 = FLAT_TRIANGLE, 2 = BOX_MESH, 3 = PRISM_MESH)
+## @param depth_scale: Depth multiplier for BOX/PRISM modes (1.0 = default, no change)
+## @returns: Vector3 scale (1.0 for unscaled axes, custom factors for scaled axes)
+static func get_scale_for_orientation(
+	orientation: int,
+	scale_factor: float = 0.0,
+	mesh_mode: int = 0,
+	depth_scale: float = 1.0
+) -> Vector3:
 	if not ORIENTATION_DATA.has(orientation):
 		return Vector3.ONE
 
 	var base_scale: Vector3 = ORIENTATION_DATA[orientation]["scale"]
+	var depth_axis: String = ORIENTATION_DATA[orientation]["depth_axis"]
 
-	# If no custom factor provided or base_scale is ONE, return as-is
-	if scale_factor == 0.0 or base_scale == Vector3.ONE:
-		return base_scale
+	# Start with base scale (handles diagonal tiles with pre-defined scale)
+	var result: Vector3 = base_scale
 
-	# Replace the scaled axis with custom factor
-	var result: Vector3 = Vector3.ONE
-	if base_scale.x != 1.0:
-		result.x = scale_factor
-	if base_scale.y != 1.0:
-		result.y = scale_factor
-	if base_scale.z != 1.0:
-		result.z = scale_factor
+	# Apply custom diagonal scale factor if provided (overrides ORIENTATION_DATA scale)
+	if scale_factor != 0.0 and base_scale != Vector3.ONE:
+		result = Vector3.ONE
+		if base_scale.x != 1.0:
+			result.x = scale_factor
+		if base_scale.y != 1.0:
+			result.y = scale_factor
+		if base_scale.z != 1.0:
+			result.z = scale_factor
+
+	# Apply depth scaling for BOX/PRISM mesh modes
+	# Always scale Y - BOX/PRISM meshes have thickness on local Y axis (Y=0 to Y=thickness)
+	# The orientation rotation (applied AFTER scale) will place this on the correct world axis
+	if depth_scale != 1.0:
+		var is_box_or_prism: bool = (
+			mesh_mode == GlobalConstants.MeshMode.BOX_MESH or
+			mesh_mode == GlobalConstants.MeshMode.PRISM_MESH
+		)
+		if is_box_or_prism:
+			result.y *= depth_scale
 
 	return result
 
@@ -710,13 +808,6 @@ static func get_orientation_tolerance(orientation: int, tolerance: float) -> Vec
 ##   - Orient SECOND: Rotates to correct plane (floor/wall/ceiling)
 ##   - Rotate LAST: Applies in-plane rotation (Q/E keys)
 ##
-## @param grid_pos: Grid position (supports fractional: 0.5, 1.75, etc.)
-## @param orientation: TileOrientation enum value (0-17)
-## @param mesh_rotation: Mesh rotation 0-3 (0°, 90°, 180°, 270°)
-## @param grid_size: Grid cell size in world units
-## @returns: Complete Transform3D ready for MultiMesh.set_instance_transform()
-##
-## Example usage:
 ## SINGLE SOURCE OF TRUTH for building tile transforms.
 ## Handles both new tile placement and rebuild from saved data.
 ##
@@ -729,6 +820,8 @@ static func get_orientation_tolerance(orientation: int, tolerance: float) -> Vec
 ## @param tilt_angle: Saved tilt angle (0.0 = use GlobalConstants.TILT_ANGLE_RAD)
 ## @param scale_factor: Saved scale factor (0.0 = use GlobalConstants.DIAGONAL_SCALE_FACTOR)
 ## @param offset_factor: Saved offset factor (0.0 = use GlobalConstants.TILT_POSITION_OFFSET_FACTOR)
+## @param mesh_mode: MeshMode enum value for depth scaling (0 = FLAT_SQUARE default)
+## @param depth_scale: Depth multiplier for BOX/PRISM modes (1.0 = default, no change)
 ## @returns: Complete Transform3D for MultiMesh.set_instance_transform()
 ##
 ## Example usage (new placement - uses GlobalConstants):
@@ -736,10 +829,9 @@ static func get_orientation_tolerance(orientation: int, tolerance: float) -> Vec
 ##
 ## Example usage (rebuild from saved - uses per-tile values):
 ##   var transform = GlobalUtil.build_tile_transform(
-##       tile_data.grid_position, tile_data.orientation, tile_data.mesh_rotation,
-##       grid_size, tile_data.is_face_flipped,
-##       tile_data.spin_angle_rad, tile_data.tilt_angle_rad,
-##       tile_data.diagonal_scale, tile_data.tilt_offset_factor
+##       grid_pos, orientation, mesh_rotation, grid_size,
+##       is_face_flipped, spin_angle, tilt_angle,
+##       diagonal_scale, tilt_offset_factor, mesh_mode, depth_scale
 ##   )
 static func build_tile_transform(
 	grid_pos: Vector3,
@@ -750,12 +842,14 @@ static func build_tile_transform(
 	spin_angle: float = 0.0,
 	tilt_angle: float = 0.0,
 	scale_factor: float = 0.0,
-	offset_factor: float = 0.0
+	offset_factor: float = 0.0,
+	mesh_mode: int = 0,
+	depth_scale: float = 1.0,
 ) -> Transform3D:
 	var transform: Transform3D = Transform3D()
 
-	# Step 1: Get scale vector (passes scale_factor - 0.0 means use GlobalConstants)
-	var scale_vector: Vector3 = get_scale_for_orientation(orientation, scale_factor)
+	# Step 1: Get scale vector (includes diagonal scale and depth scale for BOX/PRISM)
+	var scale_vector: Vector3 = get_scale_for_orientation(orientation, scale_factor, mesh_mode, depth_scale)
 	var scale_basis: Basis = Basis.from_scale(scale_vector)
 
 	# Step 2: Get orientation basis (passes tilt_angle - 0.0 means use GlobalConstants)
@@ -830,26 +924,39 @@ static func get_rotation_axis_for_orientation(orientation: int) -> Vector3:
 			return basis.y.normalized()
 
 		# === TILTED NORTH/SOUTH WALLS ===
+		# Tile mesh is flat quad with normal along local Y+, so basis.y is surface normal
 		TileOrientation.WALL_NORTH_TILT_POS_Y, TileOrientation.WALL_NORTH_TILT_NEG_Y:
-			# Tilted north wall - normal is angled between BACK and LEFT/RIGHT
 			var basis: Basis = get_tile_rotation_basis(orientation)
-			return basis.z.normalized()  # Z-axis of the basis is the surface normal
+			return basis.y.normalized()
+
+		TileOrientation.WALL_NORTH_TILT_POS_X, TileOrientation.WALL_NORTH_TILT_NEG_X:
+			var basis: Basis = get_tile_rotation_basis(orientation)
+			return basis.y.normalized()
 
 		TileOrientation.WALL_SOUTH_TILT_POS_Y, TileOrientation.WALL_SOUTH_TILT_NEG_Y:
-			# Tilted south wall - normal is angled between FORWARD and LEFT/RIGHT
 			var basis: Basis = get_tile_rotation_basis(orientation)
-			return basis.z.normalized()
+			return basis.y.normalized()
+
+		TileOrientation.WALL_SOUTH_TILT_POS_X, TileOrientation.WALL_SOUTH_TILT_NEG_X:
+			var basis: Basis = get_tile_rotation_basis(orientation)
+			return basis.y.normalized()
 
 		# === TILTED EAST/WEST WALLS ===
 		TileOrientation.WALL_EAST_TILT_POS_X, TileOrientation.WALL_EAST_TILT_NEG_X:
-			# Tilted east wall - normal is angled between LEFT and FORWARD/BACK
 			var basis: Basis = get_tile_rotation_basis(orientation)
-			return basis.x.normalized()  # X-axis of the basis is the surface normal
+			return basis.y.normalized()
+
+		TileOrientation.WALL_EAST_TILT_POS_Y, TileOrientation.WALL_EAST_TILT_NEG_Y:
+			var basis: Basis = get_tile_rotation_basis(orientation)
+			return basis.y.normalized()
 
 		TileOrientation.WALL_WEST_TILT_POS_X, TileOrientation.WALL_WEST_TILT_NEG_X:
-			# Tilted west wall - normal is angled between RIGHT and FORWARD/BACK
 			var basis: Basis = get_tile_rotation_basis(orientation)
-			return basis.x.normalized()
+			return basis.y.normalized()
+
+		TileOrientation.WALL_WEST_TILT_POS_Y, TileOrientation.WALL_WEST_TILT_NEG_Y:
+			var basis: Basis = get_tile_rotation_basis(orientation)
+			return basis.y.normalized()
 
 		_:
 			push_warning("Invalid axis orientation for rotation: ", orientation)
@@ -915,6 +1022,83 @@ static func grid_to_world(grid_pos: Vector3, grid_size: float) -> Vector3:
 ## Formula: grid_pos = (world_pos / grid_size) - GRID_ALIGNMENT_OFFSET
 static func world_to_grid(world_pos: Vector3, grid_size: float) -> Vector3:
 	return (world_pos / grid_size) - GlobalConstants.GRID_ALIGNMENT_OFFSET
+
+# ==============================================================================
+# SPATIAL REGION UTILITIES (Chunk Partitioning)
+# ==============================================================================
+# These functions support the dual-criteria spatial chunking system.
+# Tiles are assigned to chunks based on:
+#   1. Mesh type + texture repeat mode (existing)
+#   2. Spatial region (new) - fixed NxNxN unit grid cells
+#
+# Benefits:
+#   - Better frustum culling (per-region AABB vs. global)
+#   - Localized GPU updates when editing nearby tiles
+#   - More predictable memory layout for spatial queries
+# ==============================================================================
+
+## Calculates the spatial region key from a grid/world position
+## Uses fixed CHUNK_REGION_SIZE cubes (default 50x50x50 units)
+## Region (0,0,0) covers [0, CHUNK_REGION_SIZE) on each axis
+## Region (-1,0,0) covers [-CHUNK_REGION_SIZE, 0) on X axis, etc.
+##
+## @param world_pos: Position in world/grid coordinates
+## @returns: Vector3i representing region indices (rx, ry, rz)
+static func calculate_region_key(world_pos: Vector3) -> Vector3i:
+	var region_size: float = GlobalConstants.CHUNK_REGION_SIZE
+	return Vector3i(
+		int(floor(world_pos.x / region_size)),
+		int(floor(world_pos.y / region_size)),
+		int(floor(world_pos.z / region_size))
+	)
+
+
+## Packs a Vector3i region key into a single 64-bit integer for Dictionary efficiency
+## Format: (rx & 0xFFFFF) << 40 | (ry & 0xFFFFF) << 20 | (rz & 0xFFFFF)
+## Supports region indices from -524,288 to 524,287 on each axis (±26,214,400 units at 50u regions)
+##
+## @param region: Region key as Vector3i
+## @returns: 64-bit packed integer key
+static func pack_region_key(region: Vector3i) -> int:
+	const MASK_20BIT: int = 0xFFFFF  # 20 bits per axis = 1,048,575 max unsigned
+	# Shift values to fit: x gets top 20 bits, y gets middle 20, z gets bottom 20
+	return ((region.x & MASK_20BIT) << 40) | ((region.y & MASK_20BIT) << 20) | (region.z & MASK_20BIT)
+
+
+## Unpacks a 64-bit packed region key back to Vector3i
+## Inverse of pack_region_key()
+##
+## @param packed_key: 64-bit packed integer key
+## @returns: Vector3i region indices
+static func unpack_region_key(packed_key: int) -> Vector3i:
+	const MASK_20BIT: int = 0xFFFFF
+	var x: int = (packed_key >> 40) & MASK_20BIT
+	var y: int = (packed_key >> 20) & MASK_20BIT
+	var z: int = packed_key & MASK_20BIT
+	# Handle signed values (if high bit of 20-bit segment is set, it's negative)
+	if x >= 0x80000:  # 2^19 = 524288
+		x -= 0x100000  # 2^20
+	if y >= 0x80000:
+		y -= 0x100000
+	if z >= 0x80000:
+		z -= 0x100000
+	return Vector3i(x, y, z)
+
+
+## Calculates the AABB (Axis-Aligned Bounding Box) for a spatial region
+## Used for setting chunk custom_aabb for optimal frustum culling
+##
+## @param region: Region key as Vector3i
+## @returns: AABB covering the region's spatial extent
+static func get_region_aabb(region: Vector3i) -> AABB:
+	var size: float = GlobalConstants.CHUNK_REGION_SIZE
+	var origin: Vector3 = Vector3(
+		float(region.x) * size,
+		float(region.y) * size,
+		float(region.z) * size
+	)
+	return AABB(origin, Vector3(size, size, size))
+
 
 # ==============================================================================
 # TILE KEY MANAGEMENT
@@ -1014,31 +1198,35 @@ static func calculate_normalized_uv(uv_rect: Rect2, atlas_size: Vector2) -> Dict
 	}
 
 
-static func create_tile_instance(
-	grid_pos: Vector3,
-	orientation: int,
-	mesh_rotation: int,
-	uv_rect: Rect2,
-	texture: Texture2D,
-	grid_size: float,
-	is_preview: bool = false,
-	mesh_mode: GlobalConstants.MeshMode = GlobalConstants.MeshMode.FLAT_SQUARE,
-	is_face_flipped: bool = false
-) -> MeshInstance3D:
-	var instance = MeshInstance3D.new()
+## Transforms UV coordinates for baking to match runtime shader behavior
+## The runtime shader applies: vec2 flipped_uv = vec2(UV.x, 1.0 - UV.y)
+## Then samples from uv_rect. We must replicate this + rotation/flip for baked meshes.
+##
+## @param uv: Original UV coordinate in [0,1] local space
+## @param mesh_rotation: 0-3 (0°, 90°, 180°, 270°) - Q/E rotation steps
+## @param is_flipped: Whether face is horizontally flipped (F key)
+## @returns: Transformed UV coordinate ready for atlas remapping
+static func transform_uv_for_baking(uv: Vector2, mesh_rotation: int, is_flipped: bool) -> Vector2:
+	var result: Vector2 = uv
 
-	# Create appropriate mesh
-	var mesh: ArrayMesh
-	if is_preview:
-		mesh = TileMeshGenerator.create_preview_tile_quad(uv_rect, texture.get_size(), Vector2(grid_size, grid_size))
-	else:
-		mesh = TileMeshGenerator.create_tile_quad(uv_rect, texture.get_size(), Vector2(grid_size, grid_size))
+	# Step 1: Apply base Y-flip to match shader behavior
+	# Shader does: vec2 flipped_uv = vec2(UV.x, 1.0 - UV.y)
+	result.y = 1.0 - result.y
 
-	instance.mesh = mesh
-	instance.transform = build_tile_transform(grid_pos, orientation, mesh_rotation, grid_size, is_face_flipped)
-	instance.material_override = create_tile_material(texture, GlobalConstants.DEFAULT_TEXTURE_FILTER, 0)
+	# Step 2: Apply horizontal flip if face is flipped
+	if is_flipped:
+		result.x = 1.0 - result.x
 
-	return instance
+	# Step 3: Apply rotation (counter-clockwise to match vertex rotation)
+	match mesh_rotation:
+		1:  # 90° CCW
+			result = Vector2(result.y, 1.0 - result.x)
+		2:  # 180°
+			result = Vector2(1.0 - result.x, 1.0 - result.y)
+		3:  # 270° CCW
+			result = Vector2(1.0 - result.y, result.x)
+
+	return result
 
 
 # ==============================================================================
@@ -1343,7 +1531,30 @@ static func create_blocked_highlight_material() -> StandardMaterial3D:
 ## Note: Only iterates over the 2D plane defined by orientation
 ## - Floor/Ceiling (0,1): Varies X and Z, keeps Y constant
 ## - Walls (2-5): Varies based on wall normal
-static func get_grid_positions_in_area(min_pos: Vector3, max_pos: Vector3, orientation: int) -> Array[Vector3]:
+
+## Returns all grid positions within a rectangular area on a specific plane
+## SUPPORTS FRACTIONAL GRID POSITIONS (half-grid snapping via snap_size parameter)
+##
+## @param min_pos: Minimum corner of selection area (inclusive)
+## @param max_pos: Maximum corner of selection area (inclusive)
+## @param orientation: Active plane orientation (0-5)
+## @param snap_size: Grid snap resolution (1.0 = full grid, 0.5 = half-grid)
+## @returns: Array[Vector3] - All grid positions in the area at snap_size resolution
+##
+## Example:
+##   # Full grid (1.0 snap)
+##   var positions = GlobalUtil.get_grid_positions_in_area_with_snap(Vector3(0,0,0), Vector3(2,0,2), 0, 1.0)
+##   # Returns: [Vector3(0,0,0), Vector3(1,0,0), Vector3(2,0,0), ...]
+##
+##   # Half grid (0.5 snap)
+##   var positions = GlobalUtil.get_grid_positions_in_area_with_snap(Vector3(0,0,0), Vector3(2,0,2), 0, 0.5)
+##   # Returns: [Vector3(0,0,0), Vector3(0.5,0,0), Vector3(1.0,0,0), Vector3(1.5,0,0), Vector3(2.0,0,0), ...]
+static func get_grid_positions_in_area_with_snap(
+	min_pos: Vector3,
+	max_pos: Vector3,
+	orientation: int,
+	snap_size: float = 1.0
+) -> Array[Vector3]:
 	var positions: Array[Vector3] = []
 
 	# Ensure min is actually minimum and max is maximum on all axes
@@ -1358,52 +1569,72 @@ static func get_grid_positions_in_area(min_pos: Vector3, max_pos: Vector3, orien
 		max(min_pos.z, max_pos.z)
 	)
 
-	# Round to integer grid positions (area fill only works on whole cells)
-	var min_grid: Vector3i = Vector3i(
-		int(floor(actual_min.x)),
-		int(floor(actual_min.y)),
-		int(floor(actual_min.z))
+	# Snap bounds to grid resolution using snappedf()
+	# This ensures we capture the correct start/end positions for the given snap size
+	var min_snapped: Vector3 = Vector3(
+		snappedf(actual_min.x, snap_size),
+		snappedf(actual_min.y, snap_size),
+		snappedf(actual_min.z, snap_size)
 	)
-	var max_grid: Vector3i = Vector3i(
-		int(floor(actual_max.x)),
-		int(floor(actual_max.y)),
-		int(floor(actual_max.z))
+	var max_snapped: Vector3 = Vector3(
+		snappedf(actual_max.x, snap_size),
+		snappedf(actual_max.y, snap_size),
+		snappedf(actual_max.z, snap_size)
 	)
 
-	# Determine which axes to iterate based on orientation
-	# Floor (0): XZ plane (Y constant)
-	# Ceiling (1): XZ plane (Y constant)
-	# North Wall (2): XY plane (Z constant)
-	# South Wall (3): XY plane (Z constant)
-	# East Wall (4): ZY plane (X constant)
-	# West Wall (5): ZY plane (X constant)
+	# Calculate number of steps (inclusive range)
+	# Use round() to handle floating point precision issues
+	var calc_steps = func(min_val: float, max_val: float) -> int:
+		return int(round((max_val - min_val) / snap_size)) + 1
 
 	match orientation:
 		TileOrientation.FLOOR, TileOrientation.CEILING:
-			# Iterate over XZ plane
-			for x in range(min_grid.x, max_grid.x + 1):
-				for z in range(min_grid.z, max_grid.z + 1):
+			# Iterate over XZ plane at snap_size resolution
+			var x_steps: int = calc_steps.call(min_snapped.x, max_snapped.x)
+			var z_steps: int = calc_steps.call(min_snapped.z, max_snapped.z)
+			for i in range(x_steps):
+				var x: float = min_snapped.x + (i * snap_size)
+				for j in range(z_steps):
+					var z: float = min_snapped.z + (j * snap_size)
 					positions.append(Vector3(x, actual_min.y, z))
 
 		TileOrientation.WALL_NORTH, TileOrientation.WALL_SOUTH:
-			# Iterate over XY plane
-			for x in range(min_grid.x, max_grid.x + 1):
-				for y in range(min_grid.y, max_grid.y + 1):
+			# Iterate over XY plane at snap_size resolution
+			var x_steps: int = calc_steps.call(min_snapped.x, max_snapped.x)
+			var y_steps: int = calc_steps.call(min_snapped.y, max_snapped.y)
+			for i in range(x_steps):
+				var x: float = min_snapped.x + (i * snap_size)
+				for j in range(y_steps):
+					var y: float = min_snapped.y + (j * snap_size)
 					positions.append(Vector3(x, y, actual_min.z))
 
 		TileOrientation.WALL_EAST, TileOrientation.WALL_WEST:
-			# Iterate over ZY plane
-			for z in range(min_grid.z, max_grid.z + 1):
-				for y in range(min_grid.y, max_grid.y + 1):
+			# Iterate over ZY plane at snap_size resolution
+			var z_steps: int = calc_steps.call(min_snapped.z, max_snapped.z)
+			var y_steps: int = calc_steps.call(min_snapped.y, max_snapped.y)
+			for i in range(z_steps):
+				var z: float = min_snapped.z + (i * snap_size)
+				for j in range(y_steps):
+					var y: float = min_snapped.y + (j * snap_size)
 					positions.append(Vector3(actual_min.x, y, z))
 
 		_:
 			# Fallback: treat as floor (XZ plane)
-			for x in range(min_grid.x, max_grid.x + 1):
-				for z in range(min_grid.z, max_grid.z + 1):
+			var x_steps: int = calc_steps.call(min_snapped.x, max_snapped.x)
+			var z_steps: int = calc_steps.call(min_snapped.z, max_snapped.z)
+			for i in range(x_steps):
+				var x: float = min_snapped.x + (i * snap_size)
+				for j in range(z_steps):
+					var z: float = min_snapped.z + (j * snap_size)
 					positions.append(Vector3(x, actual_min.y, z))
 
 	return positions
+
+## [DEPRECATED] Use get_grid_positions_in_area_with_snap() instead
+## This function only works with full grid cells (integer positions)
+## Kept for backward compatibility - calls new function with snap_size=1.0
+static func get_grid_positions_in_area(min_pos: Vector3, max_pos: Vector3, orientation: int) -> Array[Vector3]:
+	return get_grid_positions_in_area_with_snap(min_pos, max_pos, orientation, 1.0)
 
 ## Creates a StandardMaterial3D for area fill selection box
 ## Semi-transparent cyan box that shows the area being selected

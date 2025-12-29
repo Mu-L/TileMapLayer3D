@@ -183,11 +183,13 @@ func _enter_tree() -> void:
 	auto_flip_requested.connect(_on_auto_flip_requested)  # Auto-flip feature
 	tileset_panel.grid_snap_size_changed.connect(_on_grid_snap_size_changed)
 	tileset_panel.mesh_mode_selection_changed.connect(_on_mesh_mode_selection_changed)
+	tileset_panel.mesh_mode_depth_changed.connect(_on_mesh_mode_depth_changed)
+	tileset_panel.texture_repeat_mode_changed.connect(_on_texture_repeat_mode_changed)
 	tileset_panel.grid_size_changed.connect(_on_grid_size_changed)
 	tileset_panel.texture_filter_changed.connect(_on_texture_filter_changed)
 	tileset_panel.create_collision_requested.connect(_on_create_collision_requested)
+	tileset_panel.clear_collisions_requested.connect(_on_clear_collisions_requested)
 	tileset_panel._bake_mesh_requested.connect(_on_bake_mesh_requested)
-
 	tileset_panel.clear_tiles_requested.connect(_clear_all_tiles)
 	tileset_panel.show_debug_info_requested.connect(_on_show_debug_info_requested)
 
@@ -198,6 +200,7 @@ func _enter_tree() -> void:
 	tileset_panel.autotile_data_changed.connect(_on_autotile_data_changed)
 	tileset_panel.clear_autotile_requested.connect(_on_clear_autotile_requested)
 	tileset_panel.autotile_mesh_mode_changed.connect(_on_autotile_mesh_mode_changed)
+	tileset_panel.autotile_depth_changed.connect(_on_autotile_depth_changed)
 
 	# Create tool toggle button
 	tool_button = Button.new()
@@ -206,6 +209,8 @@ func _enter_tree() -> void:
 	tool_button.toggle_mode = true
 	tool_button.toggled.connect(_on_tool_toggled)
 
+	#Sprite Mesh integration 
+	GlobalTileMapEvents.connect_request_sprite_mesh_creation(_on_request_sprite_mesh_creation)
 	# Add to 3D editor toolbar
 	add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, tool_button)
 
@@ -223,6 +228,9 @@ func _enter_tree() -> void:
 	#print("TileMapLayer3D: Dock panel added")
 
 func _exit_tree() -> void:
+	# Disconnect GlobalTileMapEvents signals to prevent stale connections
+	GlobalTileMapEvents.disconnect_request_sprite_mesh_creation(_on_request_sprite_mesh_creation)
+
 	# Save global plugin settings to EditorSettings
 	if plugin_settings:
 		var editor_settings: EditorSettings = EditorInterface.get_editor_settings()
@@ -254,18 +262,7 @@ func _exit_tree() -> void:
 # =============================================================================
 
 func _handles(object: Object) -> bool:
-	# Check if object is a TileMapLayer3D by checking the script
-	if object is Node3D:
-		var script: Script = object.get_script()
-		if script:
-			# Check if it's our TileMapLayer3D script
-			var script_path: String = script.resource_path
-			if script_path.ends_with("tile_model_3d.gd"):
-				return true
-		# Also check metadata for runtime-created nodes
-		if object.has_meta("_godot25d_tile_model"):
-			return true
-	return false
+	return object is TileMapLayer3D
 
 ##Called when a TileMapLayer3D is selected
 func _edit(object: Object) -> void:
@@ -329,9 +326,27 @@ func _edit(object: Object) -> void:
 			placement_manager.tileset_texture = current_tile_map3d.settings.tileset_texture
 			placement_manager.texture_filter_mode = current_tile_map3d.settings.texture_filter_mode
 
-		# Restore rotation and flip state from settings
+		# Restore rotation and flip (mode-independent)
 		placement_manager.current_mesh_rotation = current_tile_map3d.settings.current_mesh_rotation
 		placement_manager.is_current_face_flipped = current_tile_map3d.settings.is_face_flipped
+
+		# Restore depth based on CURRENT mode (mode-dependent)
+		var current_mode: TilesetPanel.TilingMode = TilesetPanel.TilingMode.MANUAL
+		if tileset_panel:
+			current_mode = tileset_panel.get_tiling_mode()
+
+		var correct_depth: float = current_tile_map3d.settings.current_depth_scale
+		if current_mode == TilesetPanel.TilingMode.AUTOTILE:
+			correct_depth = current_tile_map3d.settings.autotile_depth_scale
+
+		placement_manager.current_depth_scale = correct_depth
+		placement_manager.current_texture_repeat_mode = current_tile_map3d.settings.texture_repeat_mode
+
+		if tile_preview:
+			tile_preview.current_depth_scale = correct_depth
+
+		# Sync UI (deferred to ensure UI is ready)
+		call_deferred("_sync_depth_ui_on_load")
 
 		# Restore mesh mode from settings
 		current_tile_map3d.current_mesh_mode = current_tile_map3d.settings.mesh_mode as GlobalConstants.MeshMode
@@ -355,6 +370,22 @@ func _edit(object: Object) -> void:
 		current_tile_map3d = null
 		tileset_panel.set_active_node(null)
 		_cleanup_cursor()
+
+
+## Sync depth UI after node load (called deferred)
+func _sync_depth_ui_on_load() -> void:
+	if not current_tile_map3d or not tileset_panel:
+		return
+
+	# Sync Manual tab UI (always sync, regardless of mode)
+	tileset_panel.set_depth_value(current_tile_map3d.settings.current_depth_scale)
+
+	# Sync Autotile tab UI (always sync, regardless of mode)
+	if tileset_panel.auto_tile_tab:
+		var autotile_tab_node: AutotileTab = tileset_panel.auto_tile_tab as AutotileTab
+		if autotile_tab_node:
+			autotile_tab_node.set_depth_value(current_tile_map3d.settings.autotile_depth_scale)
+
 
 # =============================================================================
 # SECTION: CURSOR AND PREVIEW SETUP
@@ -760,10 +791,16 @@ func _should_update_preview(screen_pos: Vector2, grid_pos: Vector3 = Vector3.INF
 		if screen_delta < GlobalConstants.PREVIEW_MIN_MOVEMENT:
 			return false  # Not enough screen movement
 
-	# Check grid space movement
+	# Check grid space movement with DYNAMIC threshold based on snap size
 	if grid_pos != Vector3.INF and _last_preview_grid_pos != Vector3.INF:
 		var grid_delta: float = grid_pos.distance_to(_last_preview_grid_pos)
-		if grid_delta < GlobalConstants.PREVIEW_MIN_GRID_MOVEMENT:
+
+		# Calculate threshold dynamically from current snap size
+		# This fixes the bug where 0.5 snap was blocked by hardcoded 1.0 threshold
+		var snap_size: float = placement_manager.grid_snap_size if placement_manager else 1.0
+		var grid_threshold: float = snap_size * GlobalConstants.PREVIEW_GRID_MOVEMENT_MULTIPLIER
+
+		if grid_delta < grid_threshold:
 			return false  # Not enough grid movement
 
 	return true
@@ -1198,31 +1235,65 @@ func _on_selection_manager_cleared() -> void:
 		tile_preview.hide_preview()
 		tile_preview._hide_all_preview_instances()
 
-
-## Handler for Generate SIMPLE Collision button
-func _on_create_collision_requested(bake_mode: MeshBakeManager.BakeMode) -> void:
-	if not current_tile_map3d:
+## Handler for Sprite Mesh generation button
+func _on_request_sprite_mesh_creation(current_texture: Texture2D, selected_tiles: Array[Rect2], tile_size: Vector2i, grid_size: float, filter_mode: int) -> void:
+	if not current_tile_map3d or not tile_cursor:
 		push_warning("No TileMapLayer3D selected")
 		return
 
-	#print("Generating collision for ", current_tile_map3d.name, " MODE: ", str(bake_mode))
+	SpriteMeshGenerator.generate_sprite_mesh_instance(
+		current_tile_map3d,
+		current_texture,
+		selected_tiles,
+		tile_size,
+		grid_size,
+		tile_cursor.global_position,
+		filter_mode,
+		get_undo_redo()
+	)
+
+
+
+## Handler for Generate SIMPLE Collision button
+func _on_create_collision_requested(bake_mode: GlobalConstants.BakeMode, backface_collision: bool, save_external_collision: bool) -> void:
+	if not current_tile_map3d:
+		push_warning("No TileMapLayer3D selected")
+		return
 
 	var parent: Node = current_tile_map3d.get_parent()
 	if not parent:
 		push_error("TileMapLayer3D has no parent node")
 		return
 
-	#print("Bake Started! MODE: ", str(bake_mode))
+	# Build options for TileMeshMerger
+	var options: Dictionary = {
+		"alpha_aware": bake_mode == GlobalConstants.BakeMode.ALPHA_AWARE,
+		"streaming": bake_mode == GlobalConstants.BakeMode.STREAMING
+	}
 
-	var bake_result: Dictionary = MeshBakeManager.bake_to_static_mesh(
-		current_tile_map3d,
-		bake_mode,
-		get_undo_redo(),
-		parent,
-		false
-	)
+	# Call TileMeshMerger directly (no MeshBakeManager)
+	var merge_result: Dictionary = TileMeshMerger.merge_tiles(current_tile_map3d, options)
 
-	# Create collision from the baked mesh
+	if not merge_result.success:
+		push_error("Collision bake failed: %s" % merge_result.get("error", "Unknown error"))
+		return
+
+	# Create MeshInstance3D from baked mesh (for collision generation)
+	var bake_result: Dictionary = {
+		"success": true,
+		"mesh_instance": _create_baked_mesh_instance(merge_result.mesh, current_tile_map3d)
+	}
+
+	# CHECK SUCCESS BEFORE CLEARING OLD COLLISION
+	# This prevents losing existing collision when the bake fails
+	if not bake_result.success:
+		push_error("Collision bake failed: %s" % bake_result.get("error", "Unknown error"))
+		return
+
+	# Only clear existing collision if new bake succeeded
+	current_tile_map3d.clear_collision_shapes()
+
+	# Now safe to create collision from the baked mesh
 	bake_result.mesh_instance.create_trimesh_collision()
 	var new_collision_shape: ConcavePolygonShape3D = null
 
@@ -1235,7 +1306,7 @@ func _on_create_collision_requested(bake_mode: MeshBakeManager.BakeMode) -> void
 					new_collision_shape = collision_child.shape as ConcavePolygonShape3D
 					if new_collision_shape:
 						new_collision_shape = new_collision_shape.duplicate()  # duplicate so we own it
-						new_collision_shape.backface_collision = true
+						new_collision_shape.backface_collision = backface_collision
 					break
 			break
 
@@ -1246,28 +1317,94 @@ func _on_create_collision_requested(bake_mode: MeshBakeManager.BakeMode) -> void
 		push_error("Failed to generate collision new_collision_shape")
 		return
 
-	# Clear existing collision bodies
-	current_tile_map3d.clear_collision_shapes()
+	## Collision Save collision shape as external .res file (binary) to reduce scene file size
+	## Files stored in subfolder: {SceneName}_CollisionData/{SceneName}_{NodeName}_collision.res
+	if save_external_collision:
+		var scene_path: String = current_tile_map3d.get_tree().edited_scene_root.scene_file_path
+		if not scene_path.is_empty():
+			var scene_name: String = scene_path.get_file().get_basename()
+			var scene_dir: String = scene_path.get_base_dir()
 
-	# Create new collision structure
+			# Create subfolder: {SceneName}_CollisionData/
+			var collision_folder_name: String = scene_name + "_CollisionData"
+			var collision_folder: String = scene_dir.path_join(collision_folder_name)
+			var dir: DirAccess = DirAccess.open(scene_dir)
+			if dir and not dir.dir_exists(collision_folder_name):
+				var mkdir_error: Error = dir.make_dir(collision_folder_name)
+				if mkdir_error != OK:
+					push_warning("Failed to create collision folder: ", collision_folder)
+
+			# Filename: {SceneName}_{NodeName}_collision.res
+			var collision_filename: String = scene_name + "_" + current_tile_map3d.name + "_collision.res"
+			var collision_path: String = collision_folder.path_join(collision_filename)
+
+			# Delete existing .res file BEFORE saving new one
+			# This ensures we don't have stale cached resources when switching modes
+			if FileAccess.file_exists(collision_path):
+				var delete_dir: DirAccess = DirAccess.open(collision_folder)
+				if delete_dir:
+					var delete_error: Error = delete_dir.remove(collision_filename)
+					if delete_error == OK:
+						print("Deleted old collision file: ", collision_path)
+					else:
+						push_warning("Failed to delete old collision file: ", collision_path)
+
+			var save_error: Error = ResourceSaver.save(new_collision_shape, collision_path)
+			if save_error == OK:
+				# Use CACHE_MODE_REPLACE to bypass Godot's resource cache
+				# This ensures we get the newly saved data, not a stale cached version
+				var loaded_shape: ConcavePolygonShape3D = ResourceLoader.load(
+					collision_path, "", ResourceLoader.CACHE_MODE_REPLACE
+				) as ConcavePolygonShape3D
+				if loaded_shape:
+					new_collision_shape = loaded_shape
+					print("Collision saved to: ", collision_path)
+			else:
+				push_warning("Failed to save collision externally, using inline: ", save_error)
+
+	# Setup the CollisionShape3D and StaticBody3D
+	var scene_root: Node = current_tile_map3d.get_tree().edited_scene_root
 	var collision_shape: CollisionShape3D = CollisionShape3D.new()
 	collision_shape.shape = new_collision_shape
-	
+
 	var static_body: StaticCollisionBody3D = StaticCollisionBody3D.new()
 	static_body.add_child(collision_shape)
-	
-	# Add to scene and set owners (requied for editor)
+
+	# Add to scene and set owners (required for editor)
 	current_tile_map3d.add_child(static_body)
-	var scene_root: Node = current_tile_map3d.get_tree().edited_scene_root
 	static_body.owner = scene_root
 	collision_shape.owner = scene_root
 
+	#Ensure the collision shape has the correct backface setting
+	new_collision_shape.backface_collision = backface_collision
+	print("Collision Shape added to scene. Backface collision: ", new_collision_shape.backface_collision)
+
 	#print("Collision generation complete!")
+
+
+func _on_clear_collisions_requested() -> void:
+	if not current_tile_map3d:
+		push_warning("No TileMapLayer3D selected")
+		return
+
+	current_tile_map3d.clear_collision_shapes()
+	print("All collision shapes cleared from TileMapLayer3D: ", current_tile_map3d.name)
+
+
+## Creates a MeshInstance3D from a baked ArrayMesh
+## Helper function used by both bake_mesh and create_collision workflows
+func _create_baked_mesh_instance(mesh: ArrayMesh, tile_map_layer: TileMapLayer3D) -> MeshInstance3D:
+	var mesh_instance: MeshInstance3D = MeshInstance3D.new()
+	mesh_instance.name = tile_map_layer.name + "_Baked"
+	mesh_instance.mesh = mesh
+	mesh_instance.transform = tile_map_layer.transform
+	return mesh_instance
+
 
 ## Merge and Bakes the TileMapLayer3D to a new ArrayMesh creating a unified merged object
 ## This creates a single optimized mesh from all tiles with perfect UV preservation
-## NOW USES MeshBakeManager for centralized baking logic
-func _on_bake_mesh_requested(bake_mode: MeshBakeManager.BakeMode) -> void:
+## Calls TileMeshMerger directly (no intermediate layer)
+func _on_bake_mesh_requested(bake_mode: GlobalConstants.BakeMode) -> void:
 	if not Engine.is_editor_hint(): return
 
 	# Validation
@@ -1275,39 +1412,40 @@ func _on_bake_mesh_requested(bake_mode: MeshBakeManager.BakeMode) -> void:
 		push_error("No TileMapLayer3D selected for merge bake")
 		return
 
-	if current_tile_map3d.saved_tiles.is_empty():
+	if current_tile_map3d.get_tile_count() == 0:
 		push_error("TileMapLayer3D has no tiles to merge")
 		return
 
-	# Execute bake using MeshBakeManager
 	var parent: Node = current_tile_map3d.get_parent()
 	if not parent:
 		push_error("TileMapLayer3D has no parent node")
 		return
-	
-	#print("Bake Started! MODE: " , str(bake_mode))
 
-	var bake_result: Dictionary = MeshBakeManager.bake_to_static_mesh(
-		current_tile_map3d,
-		bake_mode,
-		get_undo_redo(),
-		parent,
-		true
-	)
+	# Build options for TileMeshMerger
+	var options: Dictionary = {
+		"alpha_aware": bake_mode == GlobalConstants.BakeMode.ALPHA_AWARE,
+		"streaming": bake_mode == GlobalConstants.BakeMode.STREAMING
+	}
+
+	# Call TileMeshMerger directly (no MeshBakeManager)
+	var merge_result: Dictionary = TileMeshMerger.merge_tiles(current_tile_map3d, options)
 
 	# Check result
-	if not bake_result.success:
-		push_error("Bake failed: %s" % bake_result.get("error", "Unknown error"))
+	if not merge_result.success:
+		push_error("Bake failed: %s" % merge_result.get("error", "Unknown error"))
 		return
 
-	# Print success with stats
-	#var stats: Dictionary = bake_result.get("merge_result", {})
-	#print("Bake complete! Created: %s" % bake_result.mesh_instance.name)
-	#if stats.has("tile_count"):
-	#	print("   Stats: %d tiles → %d vertices" % [
-	#		stats.get("tile_count", 0),
-	#		stats.get("vertex_count", 0)
-	#	])
+	# Create MeshInstance3D and add to scene with undo/redo
+	var mesh_instance: MeshInstance3D = _create_baked_mesh_instance(merge_result.mesh, current_tile_map3d)
+
+	# Add to scene with undo/redo
+	var undo_redo: EditorUndoRedoManager = get_undo_redo()
+	undo_redo.create_action("Bake TileMapLayer3D to Static Mesh")
+	undo_redo.add_do_method(parent, "add_child", mesh_instance)
+	undo_redo.add_do_method(mesh_instance, "set_owner", parent.get_tree().edited_scene_root)
+	undo_redo.add_do_property(mesh_instance, "name", mesh_instance.name)
+	undo_redo.add_undo_method(parent, "remove_child", mesh_instance)
+	undo_redo.commit_action()
 
 # =============================================================================
 # SECTION: CLEAR AND DEBUG OPERATIONS
@@ -1362,16 +1500,17 @@ func _do_clear_all_tiles() -> void:
 
 	#print("Clearing all tiles from ", current_tile_map3d.name)
 
-	# Clear saved tiles
-	var tile_count: int = current_tile_map3d.saved_tiles.size()
-	current_tile_map3d.saved_tiles.clear()
-	current_tile_map3d._saved_tiles_lookup.clear()  #Clear lookup dictionary
+	# Clear saved tiles (columnar storage)
+	var tile_count: int = current_tile_map3d.get_tile_count()
+	current_tile_map3d.clear_all_tiles()
 
-	# Clear runtime chunks for ALL mesh modes (square, triangle, box, prism)
+	# Clear runtime chunks for ALL mesh modes (square, triangle, box, prism, and REPEAT variants)
 	_cleanup_chunk_array(current_tile_map3d._quad_chunks)
 	_cleanup_chunk_array(current_tile_map3d._triangle_chunks)
 	_cleanup_chunk_array(current_tile_map3d._box_chunks)
 	_cleanup_chunk_array(current_tile_map3d._prism_chunks)
+	_cleanup_chunk_array(current_tile_map3d._box_repeat_chunks)
+	_cleanup_chunk_array(current_tile_map3d._prism_repeat_chunks)
 
 	# Clear tile lookup
 	current_tile_map3d._tile_lookup.clear()
@@ -1431,6 +1570,49 @@ func _on_mesh_mode_selection_changed(mesh_mode: GlobalConstants.MeshMode) -> voi
 		var camera = get_viewport().get_camera_3d()
 		if camera:
 			_update_preview(camera, get_viewport().get_mouse_position())
+
+
+## Handler for mesh mode depth change (BOX/PRISM depth scaling)
+## Manual tab only - does NOT affect autotile mode
+func _on_mesh_mode_depth_changed(depth: float) -> void:
+	# Save to per-node settings (persistent storage)
+	if current_tile_map3d and current_tile_map3d.settings:
+		current_tile_map3d.settings.current_depth_scale = depth
+
+	# Update placement manager only when NOT in autotile mode
+	if not _is_autotile_mode() and placement_manager:
+		placement_manager.current_depth_scale = depth
+
+	# Update preview depth scale only when NOT in autotile mode
+	if not _is_autotile_mode() and tile_preview:
+		tile_preview.current_depth_scale = depth
+		# Force preview refresh
+		var camera = get_viewport().get_camera_3d()
+		if camera:
+			_update_preview(camera, get_viewport().get_mouse_position())
+
+
+## Handler for BOX/PRISM texture repeat mode change
+## Saves setting to per-node settings (persistent storage)
+## Updates placement manager for new tile placement
+func _on_texture_repeat_mode_changed(mode: int) -> void:
+	#print("[TEXTURE_REPEAT] PLUGIN: Received signal with mode=%d (0=DEFAULT, 1=REPEAT)" % mode)
+
+	# Save to per-node settings (persistent storage)
+	# Note: This is also done in tileset_panel, but we keep it here for consistency
+	if current_tile_map3d and current_tile_map3d.settings:
+		current_tile_map3d.settings.texture_repeat_mode = mode
+		#print("[TEXTURE_REPEAT] PLUGIN: Saved to settings.texture_repeat_mode=%d" % mode)
+	else:
+		pass  #print("[TEXTURE_REPEAT] PLUGIN: WARNING - current_tile_map3d or settings is null!")
+
+	# Update placement manager for new tiles
+	if placement_manager:
+		placement_manager.current_texture_repeat_mode = mode
+		#print("[TEXTURE_REPEAT] PLUGIN: Updated placement_manager.current_texture_repeat_mode=%d" % mode)
+	else:
+		pass  #print("[TEXTURE_REPEAT] PLUGIN: WARNING - placement_manager is null!")
+
 
 ## Handler for grid size change (requires rebuild)
 func _on_grid_size_changed(new_size: float) -> void:
@@ -1571,8 +1753,11 @@ func _fill_area_autotile(min_pos: Vector3, max_pos: Vector3, orientation: int) -
 		push_error("Autotile area fill: Missing placement manager or tile map")
 		return -1
 
-	# Get all grid positions in the area
-	var positions: Array[Vector3] = GlobalUtil.get_grid_positions_in_area(min_pos, max_pos, orientation)
+	# Get all grid positions in the area (with snap size support)
+	var snap_size: float = placement_manager.grid_snap_size if placement_manager else 1.0
+	var positions: Array[Vector3] = GlobalUtil.get_grid_positions_in_area_with_snap(
+		min_pos, max_pos, orientation, snap_size
+	)
 
 	if positions.is_empty():
 		return 0
@@ -1773,9 +1958,11 @@ func _highlight_tiles_in_area(start_pos: Vector3, end_pos: Vector3, orientation:
 				total_in_bounds
 			])
 	else:
-		# PAINT MODE: Only highlight tiles matching current orientation at integer grid positions
-		# (Paint fill only affects integer positions)
-		var positions: Array[Vector3] = GlobalUtil.get_grid_positions_in_area(min_pos, max_pos, orientation)
+		# PAINT MODE: Highlight tiles matching current orientation (supports half-grid with 0.5 snap)
+		var snap_size: float = placement_manager.grid_snap_size if placement_manager else 1.0
+		var positions: Array[Vector3] = GlobalUtil.get_grid_positions_in_area_with_snap(
+			min_pos, max_pos, orientation, snap_size
+		)
 
 		var total_in_bounds: int = 0
 		for grid_pos in positions:
@@ -1848,14 +2035,37 @@ func _on_tiling_mode_changed(mode: TilesetPanel.TilingMode) -> void:
 		_autotile_extension.set_enabled(mode == TilesetPanel.TilingMode.AUTOTILE)
 
 	# Update preview mesh mode based on tiling mode
-	if tile_preview and current_tile_map3d:
-		if mode == TilesetPanel.TilingMode.AUTOTILE and current_tile_map3d.settings:
+	if tile_preview and current_tile_map3d and current_tile_map3d.settings:
+		if mode == TilesetPanel.TilingMode.AUTOTILE:
 			tile_preview.current_mesh_mode = current_tile_map3d.settings.autotile_mesh_mode as GlobalConstants.MeshMode
 		else:
 			tile_preview.current_mesh_mode = current_tile_map3d.current_mesh_mode
 
+	# Sync depth for new mode (deferred to ensure UI state is ready)
+	call_deferred("_sync_depth_for_mode", mode)
+
 	# Force preview refresh
 	_invalidate_preview()
+
+
+## Sync depth when mode changes (called deferred)
+func _sync_depth_for_mode(mode: TilesetPanel.TilingMode) -> void:
+	if not current_tile_map3d or not placement_manager:
+		return
+
+	# Determine correct depth based on mode
+	var correct_depth: float = current_tile_map3d.settings.current_depth_scale
+	if mode == TilesetPanel.TilingMode.AUTOTILE:
+		correct_depth = current_tile_map3d.settings.autotile_depth_scale
+
+	# Update working state
+	placement_manager.current_depth_scale = correct_depth
+
+	if tile_preview:
+		tile_preview.current_depth_scale = correct_depth
+
+	# UI is already correct (user just changed mode via UI)
+	# No need to sync UI back - would cause signal loop
 
 
 ## Syncs tileset texture from AutotileEngine to all components
@@ -1975,3 +2185,23 @@ func _on_autotile_mesh_mode_changed(mesh_mode: int) -> void:
 	# Update preview if in autotile mode
 	if tile_preview and _is_autotile_mode():
 		tile_preview.current_mesh_mode = mesh_mode as GlobalConstants.MeshMode
+
+
+## Handler for autotile depth scale changes (BOX/PRISM mesh modes)
+## Saves to settings and updates placement manager when in autotile mode
+func _on_autotile_depth_changed(depth: float) -> void:
+	# Save to per-node settings (persistent storage)
+	if current_tile_map3d and current_tile_map3d.settings:
+		current_tile_map3d.settings.autotile_depth_scale = depth
+
+	# Update placement manager only when in autotile mode
+	if _is_autotile_mode() and placement_manager:
+		placement_manager.current_depth_scale = depth
+
+	# Update preview depth scale
+	if tile_preview and _is_autotile_mode():
+		tile_preview.current_depth_scale = depth
+		# Force preview refresh
+		var camera := get_viewport().get_camera_3d()
+		if camera:
+			_update_preview(camera, get_viewport().get_mouse_position())

@@ -5,82 +5,100 @@ extends PanelContainer
 ## UI panel for tileset loading and tile selection
 ## Responsibility: Texture display, tile selection, file loading
 
-## Tiling mode enum - determines whether manual or auto tiling is active
-enum TilingMode {
-	MANUAL = 0,
-	AUTOTILE = 1,
-}
+
+# Node references (using unique names %)
+@onready var load_texture_button: Button = %LoadTextureButton
+@onready var texture_path_label: Label = %TexturePathLabel
+@onready var tile_size_x: SpinBox = %TileSizeX
+@onready var tile_size_y: SpinBox = %TileSizeY
+@onready var tileset_display: TextureRect = %TilesetDisplay
+@onready var load_texture_dialog: FileDialog = %LoadTextureDialog
+@onready var selection_highlight: ColorRect = %SelectionHighlight
+@onready var scroll_container: ScrollContainer = %TileSetScrollContainer
+#Placing Modes
+@onready var mesh_mode_dropdown: OptionButton = %MeshModeDropdown
+@onready var mesh_mode_depth_spin_box: SpinBox = %MeshModeDepthSpinBox
+#Box/Prism mesh texture repeat
+@onready var box_texture_repeat_checkbox: CheckBox = %BoxTextureRepeatCheckbox
+
+
+#SpriteMesh
+@onready var generate_sprite_mesh_btn: Button = %GenerateSpriteMeshButton
+@onready var sprite_mesh_depth_spin_box: SpinBox = %SpriteMeshDepthSpinBox
+
+@onready var export_and_collision_tab: VBoxContainer = %Export_Collision
+@onready var manual_tiling_tab: VBoxContainer = %Manual_Tiling
+@onready var auto_tile_tab: VBoxContainer = %"Auto_Tiling"
+@onready var cursor_position_label: Label = %CursorPositionLabel
+@onready var show_plane_grids_checkbox: CheckBox = %ShowPlaneGridsCheckbox
+@onready var cursor_step_dropdown: OptionButton = %CursorStepDropdown
+@onready var grid_snap_dropdown: OptionButton = %GridSnapDropdown
+@onready var grid_size_spinbox: SpinBox = %GridSizeSpinBox
+@onready var grid_size_confirm_dialog: ConfirmationDialog = %GridSizeConfirmDialog
+@onready var _texture_change_warning_dialog: ConfirmationDialog = %TextureChangeWarningDialog
+@onready var texture_filter_dropdown: OptionButton = %TextureFilterDropdown
+@onready var create_collision_button: Button = %CreateCollisionBtn 
+@onready var clear_collisions_button: Button = %ClearCollisionsButton #TODO: Add logic for this button //DEBUG 
+@onready var collision_alpha_check_box: CheckBox = %CollisionAlphaCheckBox
+@onready var backface_collision_check_box: CheckBox = %BackfaceCollisionCheckBox
+@onready var save_collision_external_check_box: CheckBox = %SaveCollisionExternally
+
+@onready var bake_alpha_check_box: CheckBox = %BakeAlphaCheckBox
+@onready var bake_mesh_button: Button = %BakeMeshButton
+@onready var clear_all_tiles_button: Button = %ClearAllTilesButton
+@onready var show_debug_button: Button = %ShowDebugInfo
+@onready var autotile_mesh_dropdown: OptionButton = %AutoTileModeDropdown
+@onready var _tab_container: TabContainer = $TabContainer
+
+
 
 # Emitted when user selects a single tile
 signal tile_selected(uv_rect: Rect2)
-
 # Emitted when user selects multiple tiles (Phase 2)
 signal multi_tile_selected(uv_rects: Array[Rect2], anchor_index: int)
-
 # Emitted when tileset texture is loaded
 signal tileset_loaded(texture: Texture2D)
-
 # Emitted when orientation changes
 signal orientation_changed(orientation: int)
-
 # Emitted when placement mode changes
 signal placement_mode_changed(mode: int)
-
 # Emitted when show plane grids checkbox is toggled
 signal show_plane_grids_changed(enabled: bool)
-
 # Emitted when cursor step size changes
 signal cursor_step_size_changed(step_size: float)
-
 # Emitted when grid snap size changes
 signal grid_snap_size_changed(snap_size: float)
-
 # Emitted when grid snap size changes
 signal mesh_mode_selection_changed(mesh_mode: GlobalConstants.MeshMode)
-
+# Emitted when mesh mode depth spinbox value changes (for BOX/PRISM depth scaling)
+signal mesh_mode_depth_changed(depth: float)
+# Emitted when BOX/PRISM texture repeat mode changes (DEFAULT or REPEAT)
+signal texture_repeat_mode_changed(mode: int)
 # Emitted when grid size changes (requires rebuild)
 signal grid_size_changed(new_size: float)
-
 # Emitted when texture filter mode changes
 signal texture_filter_changed(filter_mode: int)
-
-# Emitted when alpha threshold slider changes
-signal alpha_threshold_changed(threshold: float)
-
 # Emitted when Simple Collision button is pressed (No alpha awareness)
-signal create_collision_requested(bake_mode: MeshBakeManager.BakeMode)
-
+signal create_collision_requested(bake_mode: GlobalConstants.BakeMode, backface_collision: bool, save_external_collision: bool)
+# Emitted when Clear Collisions button is pressed
+signal clear_collisions_requested()
 # Emitted when Bake to Scene button is pressed
 # signal simple_bake_mesh_requested()
-
 # Emitted when Merge and Bake to Scene button is pressed
-signal _bake_mesh_requested(bake_mode: MeshBakeManager.BakeMode)
-
+signal _bake_mesh_requested(bake_mode: GlobalConstants.BakeMode)
 # Emitted when Clear all Tiles button is pressed
 signal clear_tiles_requested()
-
 # Emitted when Show Debug button is pressed
 signal show_debug_info_requested()
-
 # === AUTOTILE SIGNALS ===
-
 # Emitted when tiling mode changes (MANUAL or AUTOTILE)
 signal tiling_mode_changed(mode: TilingMode)
-
 # Emitted when autotile TileSet is loaded or changed
 signal autotile_tileset_changed(tileset: TileSet)
-
 # Emitted when user selects a terrain for autotile painting
 signal autotile_terrain_selected(terrain_id: int)
-
 # Emitted when TileSet content changes (terrains, peering bits) - triggers engine rebuild
 signal autotile_data_changed()
-
-# Emitted when user confirms texture change that requires clearing the TileSet
-signal clear_autotile_requested()
-
-# Emitted when autotile mesh mode changes (FLAT_SQUARE or BOX_MESH only)
-signal autotile_mesh_mode_changed(mesh_mode: int)
 
 # Node references (using unique names %)
 @onready var load_texture_button: Button = %LoadTextureButton
@@ -101,7 +119,6 @@ signal autotile_mesh_mode_changed(mesh_mode: int)
 @onready var grid_snap_dropdown: OptionButton = %GridSnapDropdown
 @onready var grid_size_spinbox: SpinBox = %GridSizeSpinBox
 @onready var grid_size_confirm_dialog: ConfirmationDialog = %GridSizeConfirmDialog
-@onready var _texture_change_warning_dialog: ConfirmationDialog = %TextureChangeWarningDialog
 @onready var texture_filter_dropdown: OptionButton = %TextureFilterDropdown
 
 @onready var create_collision_button: Button = %CreateCollisionBtn 
@@ -111,14 +128,6 @@ signal autotile_mesh_mode_changed(mesh_mode: int)
 @onready var bake_mesh_button: Button = %BakeMeshButton
 @onready var clear_all_tiles_button: Button = %ClearAllTilesButton
 @onready var show_debug_button: Button = %ShowDebugInfo
-@onready var autotile_mesh_dropdown: OptionButton = %AutoTileModeDropdown
-
-# Maps AutoTile dropdown indices to actual MeshMode values
-# AutoTile only supports FLAT_SQUARE (0) and BOX_MESH (2) - NO triangles
-const AUTOTILE_MESH_MODE_MAP: Array[int] = [
-	GlobalConstants.MeshMode.FLAT_SQUARE,  # Index 0 → value 0
-	GlobalConstants.MeshMode.BOX_MESH,     # Index 1 → value 2
-]
 
 # Autotile tab reference
 
@@ -130,81 +139,32 @@ const AUTOTILE_MESH_MODE_MAP: Array[int] = [
 var current_node: TileMapLayer3D = null  # Reference to currently edited node
 var _is_loading_from_node: bool = false  # Prevents signal loops during UI updates
 var current_texture: Texture2D = null
-
-# SelectionManager reference - UI subscribes to this for selection state
-var _selection_manager: SelectionManager = null
 var _tile_size: Vector2i = GlobalConstants.DEFAULT_TILE_SIZE
 var selected_tile_coords: Vector2i = Vector2i(0, 0)
 var has_selection: bool = false
 var _pending_grid_size: float = 0.0  # Store pending grid size change during confirmation
-
 # Zoom state
 var _current_zoom: float = GlobalConstants.TILESET_DEFAULT_ZOOM
 var _original_texture_size: Vector2 = Vector2.ZERO
 var _previous_texture: Texture2D = null  # For detecting texture changes
 
-# Tiling mode state (MANUAL or AUTOTILE)
+## Tiling mode enum - determines whether manual or auto tiling is active
+enum TilingMode {
+	MANUAL = 0,
+	AUTOTILE = 1,
+}
 var _current_tiling_mode: TilingMode = TilingMode.MANUAL
 
 # Multi-tile selection state (Phase 2)
 var _is_dragging: bool = false
 var _drag_start_pos: Vector2 = Vector2.ZERO
 var _selected_tiles: Array[Rect2] = []  # Multiple UV rects for multi-selection
-# MAX_SELECTION_SIZE now uses GlobalConstants.PREVIEW_POOL_SIZE
+const MAX_SELECTION_SIZE: int = 48  # Maximum tiles in selection //TODO: MOVE TO CONSTANT GLOBAL
 
 
 ## Returns current tile size (used by AutotileTab for TileSet creation)
 func get_tile_size() -> Vector2i:
 	return _tile_size
-
-
-## Sets the SelectionManager reference and connects to its signals
-## This makes TilesetPanel a subscriber to SelectionManager state changes
-func set_selection_manager(manager: SelectionManager) -> void:
-	# Disconnect from old manager
-	if _selection_manager:
-		if _selection_manager.selection_changed.is_connected(_on_selection_manager_changed):
-			_selection_manager.selection_changed.disconnect(_on_selection_manager_changed)
-		if _selection_manager.selection_cleared.is_connected(_on_selection_manager_cleared):
-			_selection_manager.selection_cleared.disconnect(_on_selection_manager_cleared)
-
-	_selection_manager = manager
-
-	# Connect to new manager
-	if _selection_manager:
-		_selection_manager.selection_changed.connect(_on_selection_manager_changed)
-		_selection_manager.selection_cleared.connect(_on_selection_manager_cleared)
-
-
-## Called when SelectionManager's selection changes
-## Updates UI to reflect the authoritative selection state
-func _on_selection_manager_changed(tiles: Array[Rect2], anchor: int) -> void:
-	# Update local state from SelectionManager (derived, not authoritative)
-	_selected_tiles = tiles.duplicate()
-	has_selection = tiles.size() > 0
-
-	# Update visual highlight
-	if has_selection:
-		# Update selected_tile_coords for highlight positioning
-		if _selected_tiles.size() > 0 and _tile_size.x > 0 and _tile_size.y > 0:
-			selected_tile_coords = Vector2i(
-				int(_selected_tiles[0].position.x / _tile_size.x),
-				int(_selected_tiles[0].position.y / _tile_size.y)
-			)
-		_update_selection_highlight()
-	else:
-		if selection_highlight:
-			selection_highlight.visible = false
-
-
-## Called when SelectionManager's selection is cleared
-## Hides the highlight and clears local derived state
-func _on_selection_manager_cleared() -> void:
-	_selected_tiles.clear()
-	has_selection = false
-	selected_tile_coords = Vector2i(-1, -1)
-	if selection_highlight:
-		selection_highlight.visible = false
 
 
 ## Returns the currently loaded tileset texture (or null if none)
@@ -323,9 +283,20 @@ func _connect_signals() -> void:
 		mesh_mode_dropdown.item_selected.connect(_on_mesh_mode_selected)
 		#print("   Mesh Mode dropdown connected")
 
+	# Connect mesh mode depth spinbox for BOX/PRISM depth scaling
+	if mesh_mode_depth_spin_box and not mesh_mode_depth_spin_box.value_changed.is_connected(_on_mesh_mode_depth_changed):
+		mesh_mode_depth_spin_box.value_changed.connect(_on_mesh_mode_depth_changed)
+
+	# Connect BOX/PRISM texture repeat checkbox
+	if box_texture_repeat_checkbox and not box_texture_repeat_checkbox.toggled.is_connected(_on_texture_repeat_checkbox_toggled):
+		box_texture_repeat_checkbox.toggled.connect(_on_texture_repeat_checkbox_toggled)
+
 	if create_collision_button and not create_collision_button.pressed.is_connected(_on_create_collision_button_pressed):
 		create_collision_button.pressed.connect(_on_create_collision_button_pressed)
 		#print("   Generate collision button connected")
+
+	if clear_collisions_button:
+		clear_collisions_button.pressed.connect(func(): clear_collisions_requested.emit() )
 
 	if bake_mesh_button and not bake_mesh_button.pressed.is_connected(_on_bake_mesh_button_pressed):
 		bake_mesh_button.pressed.connect(_on_bake_mesh_button_pressed)
@@ -355,11 +326,6 @@ func _connect_signals() -> void:
 		if not auto_tile_tab.tileset_data_changed.is_connected(_on_autotile_data_changed):
 			auto_tile_tab.tileset_data_changed.connect(_on_autotile_data_changed)
 			#print("   AutotileTab tileset_data_changed connected")
-
-	# Connect autotile mesh mode dropdown
-	if autotile_mesh_dropdown and not autotile_mesh_dropdown.item_selected.is_connected(_on_autotile_mesh_mode_selected):
-		autotile_mesh_dropdown.item_selected.connect(_on_autotile_mesh_mode_selected)
-		#print("   AutoTile mesh mode dropdown connected")
 
 	#print("TilesetPanel: Signal connections complete")
 
@@ -503,6 +469,14 @@ func _load_settings_to_ui(settings: TileMapLayerSettings) -> void:
 		mesh_mode_dropdown.selected = settings.mesh_mode
 
 	# Load collision configuration
+
+	# Sync Manual depth (follows rotation/flip pattern for explicit UI sync)
+	if mesh_mode_depth_spin_box:
+		mesh_mode_depth_spin_box.value = settings.current_depth_scale
+
+	# Sync BOX/PRISM texture repeat mode checkbox
+	if box_texture_repeat_checkbox:
+		box_texture_repeat_checkbox.button_pressed = (settings.texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT)
 
 	_is_loading_from_node = false
 
@@ -740,6 +714,9 @@ func _handle_tile_click(mouse_pos: Vector2) -> void:
 	# Update visual highlight
 	_update_selection_highlight()
 
+
+
+
 func _update_selection_highlight() -> void:
 	if not has_selection or not selection_highlight:
 		return
@@ -885,8 +862,8 @@ func _handle_single_tile_selection(tile_coords: Vector2i) -> void:
 		tileset_display.release_focus()
 
 	_update_selection_highlight()
-
 	# print("Single tile selected: ", tile_coords)
+
 
 ## Handles multi-tile selection (new Phase 2 functionality)
 func _handle_multi_tile_selection(tile_min: Vector2i, tile_max: Vector2i, total_tiles: int) -> void:
@@ -940,6 +917,26 @@ func _handle_multi_tile_selection(tile_min: Vector2i, tile_max: Vector2i, total_
 
 	# print("Multi-tile selection: ", _selected_tiles.size(), " tiles selected")
 
+# ==============================================================================
+# Sprite Mesh Generation and Integration section
+# ==============================================================================
+
+func _on_generate_sprite_mesh_btn_pressed() -> void: 	
+	# Emit event to generate sprite mesh from current selection
+	if not has_selection or _selected_tiles.size() == 0:
+		push_warning("TilesetPanel: No tile selected for SpriteMesh generation")
+		return
+
+	if current_texture == null:
+		push_warning("TilesetPanel: No texture loaded for SpriteMesh generation")
+		return
+
+	var grid_size := grid_size_spinbox.value if grid_size_spinbox else GlobalConstants.DEFAULT_GRID_SIZE
+	var filter_mode: int = texture_filter_dropdown.selected if texture_filter_dropdown else GlobalConstants.DEFAULT_TEXTURE_FILTER
+	GlobalTileMapEvents.emit_request_sprite_mesh_creation(current_texture, _selected_tiles, _tile_size, grid_size, filter_mode)
+	# print("TilesetPanel: Requested SpriteMesh generation for ", _selected_tiles.size(), " tiles")
+
+
 
 # ==============================================================================
 # General settings and UI event handlers
@@ -984,24 +981,6 @@ func _on_mesh_mode_selected(index: int) -> void:
 
 	var mesh_mode_selected: GlobalConstants.MeshMode = index
 	mesh_mode_selection_changed.emit(mesh_mode_selected)
-
-
-## Handler for AutoTile mesh mode dropdown
-## Maps dropdown index to correct MeshMode value (index 1 → BOX_MESH value 2)
-func _on_autotile_mesh_mode_selected(index: int) -> void:
-	# Ignore if we're loading from node
-	if _is_loading_from_node:
-		return
-
-	# Map dropdown index to actual MeshMode value
-	var mesh_mode: int = AUTOTILE_MESH_MODE_MAP[index] if index < AUTOTILE_MESH_MODE_MAP.size() else GlobalConstants.MeshMode.FLAT_SQUARE
-
-	# Save to node settings (single source of truth)
-	if current_node and current_node.settings:
-		current_node.settings.autotile_mesh_mode = mesh_mode
-
-	# Emit signal with correct MeshMode value
-	autotile_mesh_mode_changed.emit(mesh_mode)
 
 func _on_grid_size_value_changed(new_value: float) -> void:
 	#print("DEBUG: _on_grid_size_value_changed called: new_value=", new_value, ", _is_loading_from_node=", _is_loading_from_node, ", current_node=", current_node != null)
@@ -1069,14 +1048,23 @@ func _on_texture_filter_selected(index: int) -> void:
 	#print("Texture filter changed to: ", GlobalConstants.TEXTURE_FILTER_OPTIONS[index])
 
 func _on_bake_mesh_button_pressed() -> void:
-	var bake_mode: MeshBakeManager.BakeMode = MeshBakeManager.BakeMode.ALPHA_AWARE if bake_alpha_check_box.button_pressed else MeshBakeManager.BakeMode.NORMAL
+	var bake_mode: GlobalConstants.BakeMode = GlobalConstants.BakeMode.ALPHA_AWARE if bake_alpha_check_box.button_pressed else GlobalConstants.BakeMode.NORMAL
 	_bake_mesh_requested.emit(bake_mode)
 	#print("Bake to scene requested with mode: ", bake_mode)
 
 
 func _on_create_collision_button_pressed() -> void:
-	var bake_mode: MeshBakeManager.BakeMode = MeshBakeManager.BakeMode.ALPHA_AWARE if collision_check_box.button_pressed else MeshBakeManager.BakeMode.NORMAL
-	create_collision_requested.emit(bake_mode)
+	var bake_mode: GlobalConstants.BakeMode = GlobalConstants.BakeMode.ALPHA_AWARE if collision_alpha_check_box.button_pressed else GlobalConstants.BakeMode.NORMAL
+	
+	var backface_collision: bool = backface_collision_check_box.button_pressed if backface_collision_check_box else false
+
+	var save_external_collision: bool = save_collision_external_check_box.button_pressed if save_collision_external_check_box else false
+
+
+	#DEBUG 
+	#DEBUG 
+	#TODO: Add / BackFace collision?
+	create_collision_requested.emit(bake_mode, backface_collision, save_external_collision)
 	#print("Generate collision requested")
 
 
@@ -1130,6 +1118,12 @@ func _on_autotile_terrain_selected(terrain_id: int) -> void:
 func _on_autotile_data_changed() -> void:
 	autotile_data_changed.emit()
 	#print("TilesetPanel: Autotile data changed - forwarding signal")
+
+
+## Handler for autotile depth change - forwards signal to plugin
+func _on_autotile_depth_changed(depth: float) -> void:
+	autotile_depth_changed.emit(depth)
+	#print("TilesetPanel: Autotile depth changed to %.2f - forwarding signal" % depth)
 
 
 ## Updates cursor position display (supports fractional positions)

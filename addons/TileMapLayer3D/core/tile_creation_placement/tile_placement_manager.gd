@@ -68,6 +68,8 @@ var current_tile_uv: Rect2 = Rect2()
 var current_mesh_rotation: int = 0  # Mesh rotation state: 0-3 (0°, 90°, 180°, 270°)
 var is_current_face_flipped: bool = false  # Face flip state: true = back face visible (F key)
 var auto_detect_orientation: bool = false  # When true, use raycast normal to determine orientation
+var current_depth_scale: float = 0.1  # Depth scale for BOX/PRISM modes (0.1 = default thin tiles)
+var current_texture_repeat_mode: int = GlobalConstants.TextureRepeatMode.DEFAULT  # TEXTURE_REPEAT: 0=DEFAULT (stripes), 1=REPEAT (uniform)
 
 # Multi-tile selection state (Phase 4)
 var multi_tile_selection: Array[Rect2] = []  # Multiple UV rects for multi-placement
@@ -75,7 +77,6 @@ var multi_tile_anchor_index: int = 0  # Anchor tile index in selection
 
 # Shared material settings (Single Source of Truth for preview and placed tiles)
 var texture_filter_mode: int = GlobalConstants.DEFAULT_TEXTURE_FILTER  # BaseMaterial3D.TextureFilter enum
-# REMOVED: _cached_shader - now managed by GlobalUtil.create_tile_material()
 
 # Placement modes
 enum PlacementMode {
@@ -139,10 +140,22 @@ func set_texture_filter(filter_mode: int) -> void:
 ##
 ## @param tile_data: TilePlacerData to populate
 func _set_current_transform_params(tile_data: TilePlacerData) -> void:
-	tile_data.spin_angle_rad = GlobalConstants.SPIN_ANGLE_RAD
-	tile_data.tilt_angle_rad = GlobalConstants.TILT_ANGLE_RAD
-	tile_data.diagonal_scale = GlobalConstants.DIAGONAL_SCALE_FACTOR
-	tile_data.tilt_offset_factor = GlobalConstants.TILT_POSITION_OFFSET_FACTOR
+	# Only store transform params for tilted tiles (orientation 6-17)
+	# Flat tiles (0-5) use default values (0.0) and don't need storage
+	if tile_data.orientation >= 6:
+		tile_data.spin_angle_rad = GlobalConstants.SPIN_ANGLE_RAD
+		tile_data.tilt_angle_rad = GlobalConstants.TILT_ANGLE_RAD
+		tile_data.diagonal_scale = GlobalConstants.DIAGONAL_SCALE_FACTOR
+		tile_data.tilt_offset_factor = GlobalConstants.TILT_POSITION_OFFSET_FACTOR
+	# else: leave at default 0.0 values (no storage needed)
+
+	# Always store depth_scale if not default (applies to BOX/PRISM at any orientation)
+	# Note: depth_scale default is 1.0 (not 0.0 like other transform params)
+	tile_data.depth_scale = current_depth_scale
+
+	# Set texture repeat mode for BOX/PRISM meshes (DEFAULT = stripes, REPEAT = uniform)
+	tile_data.texture_repeat_mode = current_texture_repeat_mode
+	#print("[TEXTURE_REPEAT] APPLY_PARAMS: tile_data.texture_repeat_mode=%d (from current_texture_repeat_mode=%d)" % [tile_data.texture_repeat_mode, current_texture_repeat_mode])
 
 
 ## Copies transform parameters from one TilePlacerData to another.
@@ -156,6 +169,26 @@ func _copy_transform_params_from(target: TilePlacerData, source: TilePlacerData)
 	target.tilt_angle_rad = source.tilt_angle_rad
 	target.diagonal_scale = source.diagonal_scale
 	target.tilt_offset_factor = source.tilt_offset_factor
+	target.depth_scale = source.depth_scale
+	target.texture_repeat_mode = source.texture_repeat_mode
+
+
+## Restores transform parameters from compressed tile_info dictionary to TilePlacerData.
+## Use this for undo/redo operations to restore ORIGINAL values from UndoAreaData,
+## instead of applying current editor settings (which would corrupt tile state).
+##
+## @param tile_data: TilePlacerData to restore to
+## @param tile_info: Dictionary from UndoAreaData.to_tiles() containing saved transform params
+func _restore_transform_params_from_tile_info(tile_data: TilePlacerData, tile_info: Dictionary) -> void:
+	tile_data.terrain_id = tile_info.get("terrain_id", GlobalConstants.AUTOTILE_NO_TERRAIN)
+	tile_data.spin_angle_rad = tile_info.get("spin_angle_rad", 0.0)
+	tile_data.tilt_angle_rad = tile_info.get("tilt_angle_rad", 0.0)
+	tile_data.diagonal_scale = tile_info.get("diagonal_scale", 0.0)
+	tile_data.tilt_offset_factor = tile_info.get("tilt_offset_factor", 0.0)
+	# CRITICAL: Default to 1.0 for backward compatibility with old tiles
+	tile_data.depth_scale = tile_info.get("depth_scale", 1.0)
+	# TEXTURE_REPEAT mode: Default to 0 (DEFAULT = edge stripes)
+	tile_data.texture_repeat_mode = tile_info.get("texture_repeat_mode", GlobalConstants.TextureRepeatMode.DEFAULT)
 
 
 ##  Begin batch update mode
@@ -253,34 +286,12 @@ func _validate_data_structure_integrity() -> Dictionary:
 			errors.append("Tile key %d exists in _placement_data but has no TileRef" % tile_key)
 			continue
 
-		# Get the chunk this tile should be in
-		var chunk: MultiMeshTileChunkBase
-		var chunk_array_size: int = 0
-		match tile_ref.mesh_mode:
-			GlobalConstants.MeshMode.FLAT_SQUARE:
-				chunk_array_size = tile_map_layer3d_root._quad_chunks.size()
-				if tile_ref.chunk_index >= chunk_array_size:
-					errors.append("Tile key %d has invalid chunk_index %d (max=%d)" % [tile_key, tile_ref.chunk_index, chunk_array_size - 1])
-					continue
-				chunk = tile_map_layer3d_root._quad_chunks[tile_ref.chunk_index]
-			GlobalConstants.MeshMode.FLAT_TRIANGULE:
-				chunk_array_size = tile_map_layer3d_root._triangle_chunks.size()
-				if tile_ref.chunk_index >= chunk_array_size:
-					errors.append("Tile key %d has invalid chunk_index %d (max=%d)" % [tile_key, tile_ref.chunk_index, chunk_array_size - 1])
-					continue
-				chunk = tile_map_layer3d_root._triangle_chunks[tile_ref.chunk_index]
-			GlobalConstants.MeshMode.BOX_MESH:
-				chunk_array_size = tile_map_layer3d_root._box_chunks.size()
-				if tile_ref.chunk_index >= chunk_array_size:
-					errors.append("Tile key %d has invalid chunk_index %d (max=%d)" % [tile_key, tile_ref.chunk_index, chunk_array_size - 1])
-					continue
-				chunk = tile_map_layer3d_root._box_chunks[tile_ref.chunk_index]
-			GlobalConstants.MeshMode.PRISM_MESH:
-				chunk_array_size = tile_map_layer3d_root._prism_chunks.size()
-				if tile_ref.chunk_index >= chunk_array_size:
-					errors.append("Tile key %d has invalid chunk_index %d (max=%d)" % [tile_key, tile_ref.chunk_index, chunk_array_size - 1])
-					continue
-				chunk = tile_map_layer3d_root._prism_chunks[tile_ref.chunk_index]
+		# Get the chunk this tile should be in using region-aware lookup
+		var chunk: MultiMeshTileChunkBase = tile_map_layer3d_root._get_chunk_by_ref(tile_ref)
+
+		if not chunk:
+			errors.append("Tile key %d has invalid chunk reference (chunk_index=%d, region=%d, mesh_mode=%d)" % [tile_key, tile_ref.chunk_index, tile_ref.region_key_packed, tile_ref.mesh_mode])
+			continue
 
 		# Check chunk.tile_refs contains this tile
 		if not chunk.tile_refs.has(tile_key):
@@ -501,10 +512,11 @@ func snap_to_grid(grid_pos: Vector3, plane_normal: Vector3 = Vector3.ZERO, snap_
 
 	# FULL-AXIS SNAPPING: If no plane specified (Vector3.ZERO), snap all axes
 	if plane_normal == Vector3.ZERO:
+		var max_range: float = GlobalConstants.MAX_GRID_RANGE
 		return Vector3(
-			snappedf(grid_pos.x, resolution),
-			snappedf(grid_pos.y, resolution),
-			snappedf(grid_pos.z, resolution)
+			clampf(snappedf(grid_pos.x, resolution), -max_range, max_range),
+			clampf(snappedf(grid_pos.y, resolution), -max_range, max_range),
+			clampf(snappedf(grid_pos.z, resolution), -max_range, max_range)
 		)
 
 	# SELECTIVE PLANE-BASED SNAPPING: Only snap axes PARALLEL to the plane
@@ -526,6 +538,12 @@ func snap_to_grid(grid_pos: Vector3, plane_normal: Vector3 = Vector3.ZERO, snap_
 		snapped.x = snappedf(grid_pos.x, resolution)
 		snapped.y = snappedf(grid_pos.y, resolution)
 		# snapped.z stays unchanged (locked to cursor plane)
+
+	# FIX P1-10: Validate against coordinate limits to prevent tile key collisions
+	var max_range: float = GlobalConstants.MAX_GRID_RANGE
+	snapped.x = clampf(snapped.x, -max_range, max_range)
+	snapped.y = clampf(snapped.y, -max_range, max_range)
+	snapped.z = clampf(snapped.z, -max_range, max_range)
 
 	return snapped
 
@@ -645,10 +663,22 @@ func handle_placement_with_undo(
 
 	# Check if tile already exists at this position+orientation
 	var tile_key: int = GlobalUtil.make_tile_key(grid_pos, placement_orientation)
+
+	# Check for same orientation (existing behavior - replace with same orientation)
 	if _placement_data.has(tile_key):
 		_replace_tile_with_undo(tile_key, grid_pos, placement_orientation, undo_redo)
-	else:
-		_place_new_tile_with_undo(tile_key, grid_pos, placement_orientation, undo_redo)
+		return
+
+	# Check for conflicting orientations (opposite walls, tilted variants, floor/ceiling)
+	# NOTE: _find_conflicting_tile_key() now returns -1 if backface painting is allowed
+	var conflicting_key: int = _find_conflicting_tile_key(grid_pos, placement_orientation)
+	if conflicting_key != -1:
+		# Conflict found (and backface painting NOT allowed) - replace the conflicting tile
+		_replace_conflicting_tile_with_undo(conflicting_key, tile_key, grid_pos, placement_orientation, undo_redo)
+		return
+
+	# No conflict (or backface painting allowed) - place new tile
+	_place_new_tile_with_undo(tile_key, grid_pos, placement_orientation, undo_redo)
 
 ## Handles tile erasure with undo/redo
 ## Supports both single-tile erase and box erase modes
@@ -674,8 +704,17 @@ func handle_erase_with_undo(
 
 	# Single-tile erase mode
 	var tile_key: int = GlobalUtil.make_tile_key(grid_pos, erase_orientation)
+
+	# Check for tile with same orientation first
 	if _placement_data.has(tile_key):
 		_erase_tile_with_undo(tile_key, grid_pos, erase_orientation, undo_redo)
+		return
+
+	# Check for conflicting tile (different orientation at same position)
+	var conflicting_key: int = _find_conflicting_tile_key(grid_pos, erase_orientation)
+	if conflicting_key != -1:
+		var conflicting_tile: TilePlacerData = _placement_data[conflicting_key]
+		_erase_tile_with_undo(conflicting_key, conflicting_tile.grid_position, conflicting_tile.orientation, undo_redo)
 
 ## Finds intersection with cursor planes (CURSOR_PLANE mode)
 ## Raycasts to the active cursor plane (CURSOR_PLANE mode)
@@ -822,17 +861,30 @@ func _add_tile_to_multimesh(
 ) -> TileMapLayer3D.TileRef:
 	# Get current mesh mode from the TileMapLayer3D node
 	var mesh_mode: GlobalConstants.MeshMode = tile_map_layer3d_root.current_mesh_mode
+	#print("[TEXTURE_REPEAT] ADD_TILE: mesh_mode=%d, current_texture_repeat_mode=%d" % [mesh_mode, current_texture_repeat_mode])
 
-	# Get or create a chunk with available space based on mesh mode
-	var chunk: MultiMeshTileChunkBase = tile_map_layer3d_root.get_or_create_chunk(mesh_mode)
+	# Get or create a chunk using DUAL-CRITERIA CHUNKING:
+	# 1. Mesh mode + texture repeat mode (existing)
+	# 2. Spatial region based on grid_pos (new - enables better frustum culling)
+	var chunk: MultiMeshTileChunkBase = tile_map_layer3d_root.get_or_create_chunk(mesh_mode, current_texture_repeat_mode, grid_pos)
+	#print("[TEXTURE_REPEAT] ADD_TILE: Got chunk '%s' (chunk_index=%d)" % [chunk.name, chunk.chunk_index])
 
 	# Get next available instance index within this chunk
 	var instance_index: int = chunk.multimesh.visible_instance_count
 
 	# Build transform using SINGLE SOURCE OF TRUTH (GlobalUtil.build_tile_transform)
+	# Pass mesh_mode and current_depth_scale for BOX/PRISM depth scaling
 	var transform: Transform3D = GlobalUtil.build_tile_transform(
-		grid_pos, orientation, mesh_rotation, grid_size, is_face_flipped
+		grid_pos, orientation, mesh_rotation, grid_size, is_face_flipped,
+		0.0, 0.0, 0.0, 0.0,  # Use default transform params for new tiles
+		mesh_mode, current_depth_scale
 	)
+
+	# Apply flat tile orientation offset (always, for flat tiles only)
+	# Each orientation pushes slightly along its surface normal to prevent Z-fighting
+	var offset: Vector3 = GlobalUtil.calculate_flat_tile_offset(orientation, mesh_mode)
+	transform.origin += offset
+
 	chunk.multimesh.set_instance_transform(instance_index, transform)
 
 	# Set instance custom data (UV rect for shader)
@@ -862,7 +914,9 @@ func _add_tile_to_multimesh(
 	tile_ref.instance_index = instance_index
 	tile_ref.uv_rect = uv_rect
 	tile_ref.mesh_mode = mesh_mode  # Store the mesh mode
-	
+	tile_ref.texture_repeat_mode = current_texture_repeat_mode  # Store texture repeat mode for BOX/PRISM
+	tile_ref.region_key_packed = chunk.region_key_packed  # Store region key for spatial chunk lookup
+
 	tile_map_layer3d_root.add_tile_ref(tile_key, tile_ref)
 
 	#  Defer GPU update if in batch mode, otherwise update immediately
@@ -882,38 +936,15 @@ func _remove_tile_from_multimesh(tile_key: int) -> void:
 		push_warning("Attempted to remove tile that doesn't exist with key ", tile_key)
 		return
 
-	#   Get chunk from appropriate array with BOUNDS CHECKING
-	# Prevents crash from orphaned TileRefs (pointing to removed chunks after cleanup)
-	var chunk: MultiMeshTileChunkBase = null
-	var chunk_array_size: int = 0
-	var chunk_type_name: String = ""
-
-	match tile_ref.mesh_mode:
-		GlobalConstants.MeshMode.FLAT_SQUARE:
-			chunk_array_size = tile_map_layer3d_root._quad_chunks.size()
-			chunk_type_name = "quad"
-			if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < chunk_array_size:
-				chunk = tile_map_layer3d_root._quad_chunks[tile_ref.chunk_index]
-		GlobalConstants.MeshMode.FLAT_TRIANGULE:
-			chunk_array_size = tile_map_layer3d_root._triangle_chunks.size()
-			chunk_type_name = "triangle"
-			if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < chunk_array_size:
-				chunk = tile_map_layer3d_root._triangle_chunks[tile_ref.chunk_index]
-		GlobalConstants.MeshMode.BOX_MESH:
-			chunk_array_size = tile_map_layer3d_root._box_chunks.size()
-			chunk_type_name = "box"
-			if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < chunk_array_size:
-				chunk = tile_map_layer3d_root._box_chunks[tile_ref.chunk_index]
-		GlobalConstants.MeshMode.PRISM_MESH:
-			chunk_array_size = tile_map_layer3d_root._prism_chunks.size()
-			chunk_type_name = "prism"
-			if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < chunk_array_size:
-				chunk = tile_map_layer3d_root._prism_chunks[tile_ref.chunk_index]
+	# Use region-aware chunk lookup (supports both legacy flat arrays and new region registries)
+	# This is the ONLY correct way to get a chunk from TileRef with dual-criteria chunking
+	var chunk: MultiMeshTileChunkBase = tile_map_layer3d_root._get_chunk_by_ref(tile_ref)
+	var chunk_type_name: String = GlobalConstants.MeshMode.keys()[tile_ref.mesh_mode] if tile_ref.mesh_mode < GlobalConstants.MeshMode.size() else "unknown"
 
 	# Validate chunk was found
 	if not chunk:
-		push_error(" ORPHANED TILEREF: Tile key %d has invalid %s chunk_index %d (array size=%d) - cleaning up orphaned reference" %
-		           [tile_key, chunk_type_name, tile_ref.chunk_index, chunk_array_size])
+		push_error(" ORPHANED TILEREF: Tile key %d has invalid %s chunk_index %d (region_key=%d) - cleaning up orphaned reference" %
+		           [tile_key, chunk_type_name, tile_ref.chunk_index, tile_ref.region_key_packed])
 		# Clean up orphaned TileRef (likely from chunk that was removed during cleanup)
 		tile_map_layer3d_root.remove_tile_ref(tile_key)
 		_placement_data.erase(tile_key)
@@ -1026,40 +1057,70 @@ func _remove_tile_from_multimesh(tile_key: int) -> void:
 ##   Removes empty chunk from chunk array and reindexes remaining chunks
 ## Called when a chunk becomes empty (tile_count == 0) to prevent array gaps
 ## Must reindex ALL remaining chunks to fix chunk_index corruption
+## Handles all 6 chunk types: quad, triangle, box, box_repeat, prism, prism_repeat
 ## @param chunk: The empty chunk to remove (must have tile_count == 0)
 func _cleanup_empty_chunk_internal(chunk: MultiMeshTileChunkBase) -> void:
 	if chunk.tile_count != 0:
 		push_warning("Attempted to cleanup non-empty chunk (tile_count=%d)" % chunk.tile_count)
 		return
 
-	# Determine mesh mode from chunk type
+	# Determine mesh mode and texture repeat mode from chunk
 	var mesh_mode: GlobalConstants.MeshMode = chunk.mesh_mode_type
+	var texture_repeat_mode: int = chunk.texture_repeat_mode
+	var region_key_packed: int = chunk.region_key_packed
 
-	#   Find chunk's current array index BEFORE removal
-	# Need this to identify orphaned TileRefs pointing to this chunk
-	var chunk_array_index: int = -1
+	# Get the correct flat array and registry based on mesh_mode + texture_repeat_mode
+	var chunk_array: Array = []
+	var registry: Dictionary = {}
+	var chunk_type_name: String = ""
+
 	match mesh_mode:
 		GlobalConstants.MeshMode.FLAT_SQUARE:
-			chunk_array_index = tile_map_layer3d_root._quad_chunks.find(chunk)
+			chunk_array = tile_map_layer3d_root._quad_chunks
+			registry = tile_map_layer3d_root._chunk_registry_quad
+			chunk_type_name = "quad"
 		GlobalConstants.MeshMode.FLAT_TRIANGULE:
-			chunk_array_index = tile_map_layer3d_root._triangle_chunks.find(chunk)
+			chunk_array = tile_map_layer3d_root._triangle_chunks
+			registry = tile_map_layer3d_root._chunk_registry_triangle
+			chunk_type_name = "triangle"
 		GlobalConstants.MeshMode.BOX_MESH:
-			chunk_array_index = tile_map_layer3d_root._box_chunks.find(chunk)
+			# Check texture_repeat_mode to determine correct array
+			if texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT:
+				chunk_array = tile_map_layer3d_root._box_repeat_chunks
+				registry = tile_map_layer3d_root._chunk_registry_box_repeat
+				chunk_type_name = "box_repeat"
+			else:
+				chunk_array = tile_map_layer3d_root._box_chunks
+				registry = tile_map_layer3d_root._chunk_registry_box
+				chunk_type_name = "box"
 		GlobalConstants.MeshMode.PRISM_MESH:
-			chunk_array_index = tile_map_layer3d_root._prism_chunks.find(chunk)
+			# Check texture_repeat_mode to determine correct array
+			if texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT:
+				chunk_array = tile_map_layer3d_root._prism_repeat_chunks
+				registry = tile_map_layer3d_root._chunk_registry_prism_repeat
+				chunk_type_name = "prism_repeat"
+			else:
+				chunk_array = tile_map_layer3d_root._prism_chunks
+				registry = tile_map_layer3d_root._chunk_registry_prism
+				chunk_type_name = "prism"
 
+	# Find chunk's current array index BEFORE removal
+	var chunk_array_index: int = chunk_array.find(chunk)
 	if chunk_array_index == -1:
-		push_warning("Chunk not found in array during cleanup - cannot proceed safely")
+		push_warning("Chunk not found in _%s_chunks array during cleanup - cannot proceed safely" % chunk_type_name)
 		return
 
-	#   Clean up ALL orphaned TileRefs pointing to this chunk BEFORE removing it
-	# Even if chunk.tile_count == 0, orphaned TileRefs may still exist in _tile_lookup
-	# This happens when tiles were removed but TileRefs weren't cleaned up properly
+	# Clean up ALL orphaned TileRefs pointing to this chunk BEFORE removing it
+	# Uses region_key_packed + chunk_index + mesh_mode + texture_repeat_mode for precise matching
 	var orphaned_keys: Array[int] = []
 	for tile_key in tile_map_layer3d_root._tile_lookup.keys():
 		var tile_ref: TileMapLayer3D.TileRef = tile_map_layer3d_root._tile_lookup[tile_key]
-		# Check if this TileRef points to the chunk we're about to remove
-		if tile_ref.mesh_mode == mesh_mode and tile_ref.chunk_index == chunk_array_index:
+		# Check if this TileRef points to the exact chunk we're about to remove
+		# Must match: mesh_mode, texture_repeat_mode, region, AND chunk_index within that region
+		if tile_ref.mesh_mode == mesh_mode and \
+		   tile_ref.texture_repeat_mode == texture_repeat_mode and \
+		   tile_ref.region_key_packed == region_key_packed and \
+		   tile_ref.chunk_index == chunk.chunk_index:
 			orphaned_keys.append(tile_key)
 
 	# Remove all orphaned TileRefs found
@@ -1071,45 +1132,34 @@ func _cleanup_empty_chunk_internal(chunk: MultiMeshTileChunkBase) -> void:
 		_spatial_index.remove_tile(tile_key)
 
 	if orphaned_keys.size() > 0:
-		push_warning(" Cleaned up %d orphaned TileRefs during chunk removal (chunk_index=%d)" % [orphaned_keys.size(), chunk_array_index])
+		push_warning("Cleaned up %d orphaned TileRefs during chunk removal (chunk=%s region=%d chunk_index=%d)" % [orphaned_keys.size(), chunk_type_name, region_key_packed, chunk.chunk_index])
 
 	if GlobalConstants.DEBUG_CHUNK_MANAGEMENT:
-		print("Removing empty chunk: chunk_index=%d mesh_mode=%d name=%s" % [chunk.chunk_index, mesh_mode, chunk.name])
+		print("Removing empty chunk: chunk_index=%d mesh_mode=%d texture_repeat=%d region=%d name=%s" % [chunk.chunk_index, mesh_mode, texture_repeat_mode, region_key_packed, chunk.name])
 
-	# Remove from appropriate chunk array
-	var idx: int = -1
-	var chunk_type_name: String = ""
+	# Remove from region registry FIRST (before flat array)
+	if registry.has(region_key_packed):
+		var region_chunks: Array = registry[region_key_packed]
+		var region_idx: int = region_chunks.find(chunk)
+		if region_idx != -1:
+			region_chunks.remove_at(region_idx)
+			if GlobalConstants.DEBUG_CHUNK_MANAGEMENT:
+				print("  -> Removed from registry[%d] at index %d (%d chunks remaining in region)" % [region_key_packed, region_idx, region_chunks.size()])
+			# Clean up empty registry entry
+			if region_chunks.is_empty():
+				registry.erase(region_key_packed)
+				if GlobalConstants.DEBUG_CHUNK_MANAGEMENT:
+					print("  -> Removed empty region entry from registry")
+
+	# Remove from flat chunk array
+	var idx: int = chunk_array.find(chunk)
 	var remaining_count: int = 0
 
-	match mesh_mode:
-		GlobalConstants.MeshMode.FLAT_SQUARE:
-			idx = tile_map_layer3d_root._quad_chunks.find(chunk)
-			chunk_type_name = "quad"
-			if idx != -1:
-				tile_map_layer3d_root._quad_chunks.remove_at(idx)
-				remaining_count = tile_map_layer3d_root._quad_chunks.size()
-		GlobalConstants.MeshMode.FLAT_TRIANGULE:
-			idx = tile_map_layer3d_root._triangle_chunks.find(chunk)
-			chunk_type_name = "triangle"
-			if idx != -1:
-				tile_map_layer3d_root._triangle_chunks.remove_at(idx)
-				remaining_count = tile_map_layer3d_root._triangle_chunks.size()
-		GlobalConstants.MeshMode.BOX_MESH:
-			idx = tile_map_layer3d_root._box_chunks.find(chunk)
-			chunk_type_name = "box"
-			if idx != -1:
-				tile_map_layer3d_root._box_chunks.remove_at(idx)
-				remaining_count = tile_map_layer3d_root._box_chunks.size()
-		GlobalConstants.MeshMode.PRISM_MESH:
-			idx = tile_map_layer3d_root._prism_chunks.find(chunk)
-			chunk_type_name = "prism"
-			if idx != -1:
-				tile_map_layer3d_root._prism_chunks.remove_at(idx)
-				remaining_count = tile_map_layer3d_root._prism_chunks.size()
-
 	if idx != -1:
+		chunk_array.remove_at(idx)
+		remaining_count = chunk_array.size()
 		if GlobalConstants.DEBUG_CHUNK_MANAGEMENT:
-			print("  → Removed from _%s_chunks at index %d (%d %s chunks remaining)" % [chunk_type_name, idx, remaining_count, chunk_type_name])
+			print("  -> Removed from _%s_chunks at index %d (%d %s chunks remaining)" % [chunk_type_name, idx, remaining_count, chunk_type_name])
 	else:
 		push_warning("Empty %s chunk not found in _%s_chunks array" % [chunk_type_name, chunk_type_name])
 
@@ -1118,8 +1168,8 @@ func _cleanup_empty_chunk_internal(chunk: MultiMeshTileChunkBase) -> void:
 		chunk.get_parent().remove_child(chunk)
 	chunk.queue_free()
 
-	#   Reindex remaining chunks to fix chunk_index values
-	# Without this, tile_ref.chunk_index will point to wrong array positions
+	# Reindex remaining chunks to fix chunk_index values (per-region indexing)
+	# Without this, tile_ref.chunk_index will point to wrong positions within region
 	tile_map_layer3d_root.reindex_chunks()
 
 	if GlobalConstants.DEBUG_CHUNK_MANAGEMENT:
@@ -1173,18 +1223,41 @@ func _do_place_tile(tile_key: int, grid_pos: Vector3, uv_rect: Rect2, orientatio
 	fresh_data.mesh_rotation = mesh_rotation
 	fresh_data.mesh_mode = preserved_mode
 	fresh_data.is_face_flipped = preserved_flip
+	# Extract transform params for direct columnar storage
+	var spin_angle: float
+	var tilt_angle: float
+	var diagonal_scale: float
+	var tilt_offset: float
+	var depth_scale: float
+
 	# Copy transform params from original data (preserves persistency on undo/redo)
 	if data:
 		_copy_transform_params_from(fresh_data, data)
+		spin_angle = data.spin_angle_rad
+		tilt_angle = data.tilt_angle_rad
+		diagonal_scale = data.diagonal_scale
+		tilt_offset = data.tilt_offset_factor
+		depth_scale = data.depth_scale
 	else:
 		_set_current_transform_params(fresh_data)
+		spin_angle = fresh_data.spin_angle_rad
+		tilt_angle = fresh_data.tilt_angle_rad
+		diagonal_scale = fresh_data.diagonal_scale
+		tilt_offset = fresh_data.tilt_offset_factor
+		depth_scale = fresh_data.depth_scale
 
 	# Without this, undo operations create NEW keys, causing chunk_index=-1 corruption
 	var tile_ref = _add_tile_to_multimesh(grid_pos, uv_rect, orientation, mesh_rotation, preserved_flip, tile_key)
 	fresh_data.multimesh_instance_index = tile_ref.instance_index
 
 	_placement_data[tile_key] = fresh_data
-	tile_map_layer3d_root.save_tile_data(fresh_data)
+
+	# ✅ USE DIRECT COLUMNAR API - No TilePlacerData passed to storage
+	tile_map_layer3d_root.save_tile_data_direct(
+		grid_pos, uv_rect, orientation, mesh_rotation, preserved_mode,
+		preserved_flip, -1, spin_angle, tilt_angle, diagonal_scale,
+		tilt_offset, depth_scale, fresh_data.texture_repeat_mode
+	)
 
 	#  Update spatial index for fast area queries
 	_spatial_index.add_tile(tile_key, grid_pos)
@@ -1249,8 +1322,13 @@ func _do_replace_tile(tile_key: int, grid_pos: Vector3, new_uv_rect: Rect2, new_
 	_spatial_index.remove_tile(tile_key)
 	_spatial_index.add_tile(tile_key, grid_pos)
 
-	# Save to persistent storage (replaces old data)
-	tile_map_layer3d_root.save_tile_data(new_data)
+	# ✅ USE DIRECT COLUMNAR API - No TilePlacerData passed to storage
+	tile_map_layer3d_root.save_tile_data_direct(
+		grid_pos, new_uv_rect, new_orientation, new_rotation, new_data.mesh_mode,
+		new_data.is_face_flipped, -1, new_data.spin_angle_rad, new_data.tilt_angle_rad,
+		new_data.diagonal_scale, new_data.tilt_offset_factor, new_data.depth_scale,
+		new_data.texture_repeat_mode
+	)
 
 
 ## Erases tile with undo/redo
@@ -1286,6 +1364,86 @@ func _do_erase_tile(tile_key: int) -> void:
 
 		#  Update spatial index for fast area queries
 		_spatial_index.remove_tile(tile_key)
+
+
+# =============================================================================
+# SECTION: CONFLICTING TILE DETECTION AND REPLACEMENT
+# =============================================================================
+# Detects and replaces tiles that occupy the same plane at the same position.
+# Uses depth_axis comparison - tiles with same depth_axis (e.g., FLOOR/CEILING
+# both have "y", WALL_NORTH/WALL_SOUTH both have "z") are considered conflicting.
+# =============================================================================
+
+## Finds if any conflicting tile exists at the given position
+## Returns the tile key if found, -1 if no conflict
+## Uses depth_axis comparison - tiles with same depth_axis conflict
+## NOTE: Opposite orientations are allowed for FLAT tiles (no conflict)
+func _find_conflicting_tile_key(grid_pos: Vector3, orientation: int) -> int:
+	# Check all possible orientations for conflicts at this position
+	for other_orientation in range(GlobalUtil.TileOrientation.size()):
+		if GlobalUtil.orientations_conflict(orientation, other_orientation):
+			var other_key: int = GlobalUtil.make_tile_key(grid_pos, other_orientation)
+			if _placement_data.has(other_key):
+				# Check if opposite orientations should be allowed (flat tiles coexist)
+				var existing_tile: TilePlacerData = _placement_data[other_key]
+				var opposite_ori: int = GlobalUtil.get_opposite_orientation(orientation)
+
+				# Allow opposite orientations for FLAT mesh types (they get automatic offset)
+				if other_orientation == opposite_ori:
+					var is_existing_flat: bool = (
+						existing_tile.mesh_mode == GlobalConstants.MeshMode.FLAT_SQUARE or
+						existing_tile.mesh_mode == GlobalConstants.MeshMode.FLAT_TRIANGULE
+					)
+					var is_new_flat: bool = (
+						tile_map_layer3d_root.current_mesh_mode == GlobalConstants.MeshMode.FLAT_SQUARE or
+						tile_map_layer3d_root.current_mesh_mode == GlobalConstants.MeshMode.FLAT_TRIANGULE
+					)
+					if is_existing_flat and is_new_flat:
+						continue  # Both flat, opposite orientations - allowed to coexist
+				return other_key
+	return -1
+
+
+## Replaces a conflicting tile (different orientation) with a new tile
+## Creates a single undo action that removes old + places new
+func _replace_conflicting_tile_with_undo(
+	old_key: int,
+	new_key: int,
+	grid_pos: Vector3,
+	new_orientation: GlobalUtil.TileOrientation,
+	undo_redo: EditorUndoRedoManager
+) -> void:
+	var old_tile: TilePlacerData = _placement_data[old_key]
+
+	# Create copy of old tile for undo
+	var old_tile_copy: TilePlacerData = TileDataPool.acquire()
+	old_tile_copy.uv_rect = old_tile.uv_rect
+	old_tile_copy.grid_position = old_tile.grid_position
+	old_tile_copy.orientation = old_tile.orientation
+	old_tile_copy.mesh_rotation = old_tile.mesh_rotation
+	old_tile_copy.is_face_flipped = old_tile.is_face_flipped
+	old_tile_copy.mesh_mode = old_tile.mesh_mode
+	_copy_transform_params_from(old_tile_copy, old_tile)
+
+	# Create new tile data
+	var new_tile: TilePlacerData = TileDataPool.acquire()
+	new_tile.uv_rect = current_tile_uv
+	new_tile.grid_position = grid_pos
+	new_tile.orientation = new_orientation
+	new_tile.mesh_rotation = current_mesh_rotation
+	new_tile.is_face_flipped = is_current_face_flipped
+	new_tile.mesh_mode = tile_map_layer3d_root.current_mesh_mode
+	_set_current_transform_params(new_tile)
+
+	undo_redo.create_action("Replace Tile")
+	# Do: erase old, place new
+	undo_redo.add_do_method(self, "_do_erase_tile", old_key)
+	undo_redo.add_do_method(self, "_do_place_tile", new_key, grid_pos, new_tile.uv_rect, new_orientation, new_tile.mesh_rotation, new_tile)
+	# Undo: erase new, restore old
+	undo_redo.add_undo_method(self, "_do_erase_tile", new_key)
+	undo_redo.add_undo_method(self, "_do_place_tile", old_key, old_tile_copy.grid_position, old_tile_copy.uv_rect, old_tile_copy.orientation, old_tile_copy.mesh_rotation, old_tile_copy)
+	undo_redo.commit_action()
+
 
 # =============================================================================
 # SECTION: MULTI-TILE OPERATIONS
@@ -1473,7 +1631,7 @@ func paint_tile_at(grid_pos: Vector3, orientation: GlobalUtil.TileOrientation) -
 	# Create tile key
 	var tile_key: int = GlobalUtil.make_tile_key(grid_pos, orientation)
 
-	# Check if tile already exists at this position
+	# Check if tile already exists at this position (same orientation)
 	if _placement_data.has(tile_key):
 		# Tile exists - replace it
 		var old_data: TilePlacerData = _placement_data[tile_key]
@@ -1491,23 +1649,61 @@ func paint_tile_at(grid_pos: Vector3, orientation: GlobalUtil.TileOrientation) -
 
 		# Immediately execute for live visual feedback (commit_action will skip execution)
 		_do_replace_tile(tile_key, grid_pos, current_tile_uv, orientation, current_mesh_rotation, new_data)
-	else:
-		# New tile placement
-		var tile_data: TilePlacerData = TileDataPool.acquire()  #  Use object pool
-		tile_data.uv_rect = current_tile_uv
-		tile_data.grid_position = grid_pos
-		tile_data.orientation = orientation
-		tile_data.mesh_rotation = current_mesh_rotation
-		tile_data.is_face_flipped = is_current_face_flipped  # Store current flip state
-		tile_data.mesh_mode = tile_map_layer3d_root.current_mesh_mode
-		_set_current_transform_params(tile_data)  # Store current transform params
+		return true
 
-		# Add to ongoing undo action
-		_paint_stroke_undo_redo.add_do_method(self, "_do_place_tile", tile_key, grid_pos, current_tile_uv, orientation, current_mesh_rotation, tile_data)
-		_paint_stroke_undo_redo.add_undo_method(self, "_undo_place_tile", tile_key)
+	# Check for conflicting orientations (opposite walls, tilted variants, floor/ceiling)
+	var conflicting_key: int = _find_conflicting_tile_key(grid_pos, orientation)
+	if conflicting_key != -1:
+		var old_data: TilePlacerData = _placement_data[conflicting_key]
 
-		# Immediately execute for live visual feedback (commit_action will skip execution)
-		_do_place_tile(tile_key, grid_pos, current_tile_uv, orientation, current_mesh_rotation, tile_data)
+		# Create copy of old tile for undo
+		var old_tile_copy: TilePlacerData = TileDataPool.acquire()
+		old_tile_copy.uv_rect = old_data.uv_rect
+		old_tile_copy.grid_position = old_data.grid_position
+		old_tile_copy.orientation = old_data.orientation
+		old_tile_copy.mesh_rotation = old_data.mesh_rotation
+		old_tile_copy.is_face_flipped = old_data.is_face_flipped
+		old_tile_copy.mesh_mode = old_data.mesh_mode
+		_copy_transform_params_from(old_tile_copy, old_data)
+
+		# Create new tile data
+		var new_data: TilePlacerData = TileDataPool.acquire()
+		new_data.uv_rect = current_tile_uv
+		new_data.grid_position = grid_pos
+		new_data.orientation = orientation
+		new_data.mesh_rotation = current_mesh_rotation
+		new_data.is_face_flipped = is_current_face_flipped
+		new_data.mesh_mode = tile_map_layer3d_root.current_mesh_mode
+		_set_current_transform_params(new_data)
+
+		# Add to ongoing undo action: erase old, place new
+		_paint_stroke_undo_redo.add_do_method(self, "_do_erase_tile", conflicting_key)
+		_paint_stroke_undo_redo.add_do_method(self, "_do_place_tile", tile_key, grid_pos, new_data.uv_rect, orientation, new_data.mesh_rotation, new_data)
+		# Undo: erase new, restore old
+		_paint_stroke_undo_redo.add_undo_method(self, "_do_erase_tile", tile_key)
+		_paint_stroke_undo_redo.add_undo_method(self, "_do_place_tile", conflicting_key, old_tile_copy.grid_position, old_tile_copy.uv_rect, old_tile_copy.orientation, old_tile_copy.mesh_rotation, old_tile_copy)
+
+		# Immediately execute for live visual feedback
+		_do_erase_tile(conflicting_key)
+		_do_place_tile(tile_key, grid_pos, new_data.uv_rect, orientation, new_data.mesh_rotation, new_data)
+		return true
+
+	# New tile placement (no conflicts)
+	var tile_data: TilePlacerData = TileDataPool.acquire()  #  Use object pool
+	tile_data.uv_rect = current_tile_uv
+	tile_data.grid_position = grid_pos
+	tile_data.orientation = orientation
+	tile_data.mesh_rotation = current_mesh_rotation
+	tile_data.is_face_flipped = is_current_face_flipped  # Store current flip state
+	tile_data.mesh_mode = tile_map_layer3d_root.current_mesh_mode
+	_set_current_transform_params(tile_data)  # Store current transform params
+
+	# Add to ongoing undo action
+	_paint_stroke_undo_redo.add_do_method(self, "_do_place_tile", tile_key, grid_pos, current_tile_uv, orientation, current_mesh_rotation, tile_data)
+	_paint_stroke_undo_redo.add_undo_method(self, "_undo_place_tile", tile_key)
+
+	# Immediately execute for live visual feedback (commit_action will skip execution)
+	_do_place_tile(tile_key, grid_pos, current_tile_uv, orientation, current_mesh_rotation, tile_data)
 
 	return true
 
@@ -1550,6 +1746,11 @@ func paint_multi_tiles_at(anchor_grid_pos: Vector3, orientation: GlobalUtil.Tile
 		# Create tile key
 		var tile_key: int = GlobalUtil.make_tile_key(tile_grid_pos, orientation)
 
+		# Check for conflicting tile (different orientation at same position)
+		var conflicting_key: int = -1
+		if not _placement_data.has(tile_key):
+			conflicting_key = _find_conflicting_tile_key(tile_grid_pos, orientation)
+
 		# Store tile info
 		tiles_to_place.append({
 			"tile_key": tile_key,
@@ -1557,13 +1758,14 @@ func paint_multi_tiles_at(anchor_grid_pos: Vector3, orientation: GlobalUtil.Tile
 			"uv_rect": tile_uv_rect,
 			"orientation": orientation,
 			"mesh_rotation": current_mesh_rotation,
-			"is_replacement": _placement_data.has(tile_key)
+			"is_replacement": _placement_data.has(tile_key),
+			"conflicting_key": conflicting_key
 		})
 
 	# Add do/undo methods for each tile to the ongoing paint stroke
 	for tile_info in tiles_to_place:
 		if tile_info.is_replacement:
-			# Tile already exists - replace it
+			# Tile already exists (same orientation) - replace it
 			var old_data: TilePlacerData = _placement_data[tile_info.tile_key]
 			var new_data: TilePlacerData = TileDataPool.acquire()  #  Use object pool
 			new_data.uv_rect = tile_info.uv_rect
@@ -1578,8 +1780,44 @@ func paint_multi_tiles_at(anchor_grid_pos: Vector3, orientation: GlobalUtil.Tile
 
 			# Immediately execute for live visual feedback (commit_action will skip execution)
 			_do_replace_tile(tile_info.tile_key, tile_info.grid_pos, tile_info.uv_rect, tile_info.orientation, tile_info.mesh_rotation, new_data)
+
+		elif tile_info.conflicting_key != -1:
+			# Conflicting tile exists (different orientation) - erase it and place new
+			var old_data: TilePlacerData = _placement_data[tile_info.conflicting_key]
+
+			# Create copy of old tile for undo
+			var old_tile_copy: TilePlacerData = TileDataPool.acquire()
+			old_tile_copy.uv_rect = old_data.uv_rect
+			old_tile_copy.grid_position = old_data.grid_position
+			old_tile_copy.orientation = old_data.orientation
+			old_tile_copy.mesh_rotation = old_data.mesh_rotation
+			old_tile_copy.is_face_flipped = old_data.is_face_flipped
+			old_tile_copy.mesh_mode = old_data.mesh_mode
+			_copy_transform_params_from(old_tile_copy, old_data)
+
+			# Create new tile data
+			var new_data: TilePlacerData = TileDataPool.acquire()
+			new_data.uv_rect = tile_info.uv_rect
+			new_data.grid_position = tile_info.grid_pos
+			new_data.orientation = tile_info.orientation
+			new_data.mesh_rotation = tile_info.mesh_rotation
+			new_data.is_face_flipped = is_current_face_flipped
+			new_data.mesh_mode = tile_map_layer3d_root.current_mesh_mode
+			_set_current_transform_params(new_data)
+
+			# Add to ongoing undo action: erase old, place new
+			_paint_stroke_undo_redo.add_do_method(self, "_do_erase_tile", tile_info.conflicting_key)
+			_paint_stroke_undo_redo.add_do_method(self, "_do_place_tile", tile_info.tile_key, tile_info.grid_pos, new_data.uv_rect, tile_info.orientation, new_data.mesh_rotation, new_data)
+			# Undo: erase new, restore old
+			_paint_stroke_undo_redo.add_undo_method(self, "_do_erase_tile", tile_info.tile_key)
+			_paint_stroke_undo_redo.add_undo_method(self, "_do_place_tile", tile_info.conflicting_key, old_tile_copy.grid_position, old_tile_copy.uv_rect, old_tile_copy.orientation, old_tile_copy.mesh_rotation, old_tile_copy)
+
+			# Immediately execute for live visual feedback
+			_do_erase_tile(tile_info.conflicting_key)
+			_do_place_tile(tile_info.tile_key, tile_info.grid_pos, new_data.uv_rect, tile_info.orientation, new_data.mesh_rotation, new_data)
+
 		else:
-			# New tile placement
+			# New tile placement (no conflicts)
 			var tile_data: TilePlacerData = TileDataPool.acquire()  #  Use object pool
 			tile_data.uv_rect = tile_info.uv_rect
 			tile_data.grid_position = tile_info.grid_pos
@@ -1610,21 +1848,32 @@ func erase_tile_at(grid_pos: Vector3, orientation: GlobalUtil.TileOrientation) -
 	# Create tile key
 	var tile_key: int = GlobalUtil.make_tile_key(grid_pos, orientation)
 
-	# Check if tile exists at this position
-	if not _placement_data.has(tile_key):
-		return false  # No tile to erase
+	# Check if tile exists at this position (same orientation)
+	if _placement_data.has(tile_key):
+		var tile_data: TilePlacerData = _placement_data[tile_key]
 
-	# Get tile data for undo
-	var tile_data: TilePlacerData = _placement_data[tile_key]
+		# Add erase operation to ongoing paint stroke
+		_paint_stroke_undo_redo.add_do_method(self, "_do_erase_tile", tile_key)
+		_paint_stroke_undo_redo.add_undo_method(self, "_do_place_tile", tile_key, grid_pos, tile_data.uv_rect, orientation, tile_data.mesh_rotation, tile_data)
 
-	# Add erase operation to ongoing paint stroke
-	_paint_stroke_undo_redo.add_do_method(self, "_do_erase_tile", tile_key)
-	_paint_stroke_undo_redo.add_undo_method(self, "_do_place_tile", tile_key, grid_pos, tile_data.uv_rect, orientation, tile_data.mesh_rotation, tile_data)
+		# Immediately execute for live visual feedback (commit_action will skip execution)
+		_do_erase_tile(tile_key)
+		return true
 
-	# Immediately execute for live visual feedback (commit_action will skip execution)
-	_do_erase_tile(tile_key)
+	# Check for conflicting tile (different orientation at same position)
+	var conflicting_key: int = _find_conflicting_tile_key(grid_pos, orientation)
+	if conflicting_key != -1:
+		var tile_data: TilePlacerData = _placement_data[conflicting_key]
 
-	return true
+		# Add erase operation to ongoing paint stroke
+		_paint_stroke_undo_redo.add_do_method(self, "_do_erase_tile", conflicting_key)
+		_paint_stroke_undo_redo.add_undo_method(self, "_do_place_tile", conflicting_key, tile_data.grid_position, tile_data.uv_rect, tile_data.orientation, tile_data.mesh_rotation, tile_data)
+
+		# Immediately execute for live visual feedback
+		_do_erase_tile(conflicting_key)
+		return true
+
+	return false  # No tile to erase
 
 ## Ends the current paint stroke (commits the batched undo action)
 ## Call this when the user releases the mouse button
@@ -1655,11 +1904,11 @@ func sync_from_tile_model() -> void:
 	if not tile_map_layer3d_root:
 		return
 
-	#   If _tile_lookup is empty but saved_tiles exist, chunks haven't been rebuilt yet
+	#   If _tile_lookup is empty but tiles exist, chunks haven't been rebuilt yet
 	# This happens during scene reload because _rebuild_chunks_from_saved_data() is deferred
 	# Force immediate rebuild to avoid false corruption errors during validation
-	if tile_map_layer3d_root._tile_lookup.is_empty() and not tile_map_layer3d_root.saved_tiles.is_empty():
-		#print("sync_from_tile_model: _tile_lookup empty but %d saved_tiles exist - forcing immediate rebuild..." % tile_map_layer3d_root.saved_tiles.size())
+	if tile_map_layer3d_root._tile_lookup.is_empty() and tile_map_layer3d_root.get_tile_count() > 0:
+		#print("sync_from_tile_model: _tile_lookup empty but %d tiles exist - forcing immediate rebuild..." % tile_map_layer3d_root.get_tile_count())
 		tile_map_layer3d_root._rebuild_chunks_from_saved_data(false)  # force_mesh_rebuild=false (meshes already correct)
 		#print("Immediate rebuild complete - _tile_lookup now has %d entries" % tile_map_layer3d_root._tile_lookup.size())
 
@@ -1669,7 +1918,8 @@ func sync_from_tile_model() -> void:
 
 	# Rebuild placement data AND spatial index from saved tiles
 	var validation_errors: int = 0
-	for tile_data in tile_map_layer3d_root.saved_tiles:
+	for tile_idx in range(tile_map_layer3d_root.get_tile_count()):
+		var tile_data: TilePlacerData = tile_map_layer3d_root.get_tile_at(tile_idx)
 		var tile_key: int = GlobalUtil.make_tile_key(tile_data.grid_position, tile_data.orientation)
 		_placement_data[tile_key] = tile_data
 
@@ -1686,34 +1936,12 @@ func sync_from_tile_model() -> void:
 			continue
 
 		# Validate chunk exists and has this tile in its dictionaries
-		var chunk: MultiMeshTileChunkBase = null
-		var chunk_array_size: int = 0
-		var chunk_type_name: String = ""
-
-		match tile_ref.mesh_mode:
-			GlobalConstants.MeshMode.FLAT_SQUARE:
-				chunk_array_size = tile_map_layer3d_root._quad_chunks.size()
-				chunk_type_name = "quad"
-				if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < chunk_array_size:
-					chunk = tile_map_layer3d_root._quad_chunks[tile_ref.chunk_index]
-			GlobalConstants.MeshMode.FLAT_TRIANGULE:
-				chunk_array_size = tile_map_layer3d_root._triangle_chunks.size()
-				chunk_type_name = "triangle"
-				if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < chunk_array_size:
-					chunk = tile_map_layer3d_root._triangle_chunks[tile_ref.chunk_index]
-			GlobalConstants.MeshMode.BOX_MESH:
-				chunk_array_size = tile_map_layer3d_root._box_chunks.size()
-				chunk_type_name = "box"
-				if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < chunk_array_size:
-					chunk = tile_map_layer3d_root._box_chunks[tile_ref.chunk_index]
-			GlobalConstants.MeshMode.PRISM_MESH:
-				chunk_array_size = tile_map_layer3d_root._prism_chunks.size()
-				chunk_type_name = "prism"
-				if tile_ref.chunk_index >= 0 and tile_ref.chunk_index < chunk_array_size:
-					chunk = tile_map_layer3d_root._prism_chunks[tile_ref.chunk_index]
+		# Use region-aware chunk lookup (supports both legacy and new region-based chunking)
+		var chunk: MultiMeshTileChunkBase = tile_map_layer3d_root._get_chunk_by_ref(tile_ref)
+		var chunk_type_name: String = GlobalConstants.MeshMode.keys()[tile_ref.mesh_mode] if tile_ref.mesh_mode < GlobalConstants.MeshMode.size() else "unknown"
 
 		if not chunk:
-			push_error("❌ CORRUPTION: Tile key %d has invalid %s chunk_index %d (max %d)" % [tile_key, chunk_type_name, tile_ref.chunk_index, chunk_array_size - 1])
+			push_error("❌ CORRUPTION: Tile key %d has invalid %s chunk_index %d (region=%d)" % [tile_key, chunk_type_name, tile_ref.chunk_index, tile_ref.region_key_packed])
 			validation_errors += 1
 			continue
 
@@ -1782,11 +2010,12 @@ func fill_area_with_undo_compressed(
 		push_error("TilePlacementManager: Cannot fill area - no tile selected")
 		return -1
 
-	# Get all grid positions in the selected area
-	var positions: Array[Vector3] = GlobalUtil.get_grid_positions_in_area(
+	# Get all grid positions in the selected area (with snap size support)
+	var positions: Array[Vector3] = GlobalUtil.get_grid_positions_in_area_with_snap(
 		min_grid_pos,
 		max_grid_pos,
-		orientation
+		orientation,
+		grid_snap_size  # Pass current snap size for half-grid support
 	)
 
 	# Safety check: prevent massive fills
@@ -1799,7 +2028,20 @@ func fill_area_with_undo_compressed(
 
 	# Build lightweight tile list for compression
 	var tiles_to_place: Array = []
-	var existing_tiles: Array = []
+	var existing_tiles: Array = []  # Tiles to restore on undo (same orientation replacements)
+	var conflicting_tiles: Array = []  # Tiles to erase (different orientation conflicts)
+
+	# Capture current transform params for new tiles
+	# Tilted orientations (6+) need transform params, flat orientations (0-5) use defaults
+	var new_spin_angle: float = 0.0
+	var new_tilt_angle: float = 0.0
+	var new_diagonal_scale: float = 0.0
+	var new_tilt_offset: float = 0.0
+	if orientation >= 6:
+		new_spin_angle = GlobalConstants.SPIN_ANGLE_RAD
+		new_tilt_angle = GlobalConstants.TILT_ANGLE_RAD
+		new_diagonal_scale = GlobalConstants.DIAGONAL_SCALE_FACTOR
+		new_tilt_offset = GlobalConstants.TILT_POSITION_OFFSET_FACTOR
 
 	for grid_pos in positions:
 		var tile_key: int = GlobalUtil.make_tile_key(grid_pos, orientation)
@@ -1811,10 +2053,17 @@ func fill_area_with_undo_compressed(
 			"orientation": orientation,
 			"rotation": current_mesh_rotation,
 			"flip": is_current_face_flipped,
-			"mode": tile_map_layer3d_root.current_mesh_mode
+			"mode": tile_map_layer3d_root.current_mesh_mode,
+			"terrain_id": GlobalConstants.AUTOTILE_NO_TERRAIN,
+			"spin_angle_rad": new_spin_angle,
+			"tilt_angle_rad": new_tilt_angle,
+			"diagonal_scale": new_diagonal_scale,
+			"tilt_offset_factor": new_tilt_offset,
+			"depth_scale": current_depth_scale,
+			"texture_repeat_mode": current_texture_repeat_mode  # BOX/PRISM UV mode
 		}
 
-		# Store existing tiles for undo
+		# Store existing tiles for undo (same orientation)
 		if _placement_data.has(tile_key):
 			var existing: TilePlacerData = _placement_data[tile_key]
 			var existing_info: Dictionary = {
@@ -1824,9 +2073,38 @@ func fill_area_with_undo_compressed(
 				"orientation": existing.orientation,
 				"rotation": existing.mesh_rotation,
 				"flip": existing.is_face_flipped,
-				"mode": existing.mesh_mode
+				"mode": existing.mesh_mode,
+				"terrain_id": existing.terrain_id,
+				"spin_angle_rad": existing.spin_angle_rad,
+				"tilt_angle_rad": existing.tilt_angle_rad,
+				"diagonal_scale": existing.diagonal_scale,
+				"tilt_offset_factor": existing.tilt_offset_factor,
+				"depth_scale": existing.depth_scale,
+				"texture_repeat_mode": existing.texture_repeat_mode  # BOX/PRISM UV mode
 			}
 			existing_tiles.append(existing_info)
+		else:
+			# Check for conflicting tile (different orientation at same position)
+			var conflicting_key: int = _find_conflicting_tile_key(grid_pos, orientation)
+			if conflicting_key != -1:
+				var conflicting: TilePlacerData = _placement_data[conflicting_key]
+				var conflicting_info: Dictionary = {
+					"tile_key": conflicting_key,
+					"grid_pos": conflicting.grid_position,
+					"uv_rect": conflicting.uv_rect,
+					"orientation": conflicting.orientation,
+					"rotation": conflicting.mesh_rotation,
+					"flip": conflicting.is_face_flipped,
+					"mode": conflicting.mesh_mode,
+					"terrain_id": conflicting.terrain_id,
+					"spin_angle_rad": conflicting.spin_angle_rad,
+					"tilt_angle_rad": conflicting.tilt_angle_rad,
+					"diagonal_scale": conflicting.diagonal_scale,
+					"tilt_offset_factor": conflicting.tilt_offset_factor,
+					"depth_scale": conflicting.depth_scale,
+					"texture_repeat_mode": conflicting.texture_repeat_mode  # BOX/PRISM UV mode
+				}
+				conflicting_tiles.append(conflicting_info)
 
 		tiles_to_place.append(tile_info)
 
@@ -1835,11 +2113,14 @@ func fill_area_with_undo_compressed(
 	var compressed_old: UndoData.UndoAreaData = null
 	if existing_tiles.size() > 0:
 		compressed_old = UndoData.UndoAreaData.from_tiles(existing_tiles)
+	var compressed_conflicting: UndoData.UndoAreaData = null
+	if conflicting_tiles.size() > 0:
+		compressed_conflicting = UndoData.UndoAreaData.from_tiles(conflicting_tiles)
 
 	# Single undo action with compressed data
 	undo_redo.create_action("Fill Area (%d tiles)" % tiles_to_place.size())
-	undo_redo.add_do_method(self, "_do_area_fill_compressed", compressed_new)
-	undo_redo.add_undo_method(self, "_undo_area_fill_compressed", compressed_new, compressed_old)
+	undo_redo.add_do_method(self, "_do_area_fill_compressed_with_conflicts", compressed_new, compressed_conflicting)
+	undo_redo.add_undo_method(self, "_undo_area_fill_compressed_with_conflicts", compressed_new, compressed_old, compressed_conflicting)
 	undo_redo.commit_action()
 
 	return tiles_to_place.size()
@@ -1862,7 +2143,8 @@ func _do_area_fill_compressed(area_data: UndoData.UndoAreaData) -> void:
 		tile_data.mesh_rotation = tile_info.rotation
 		tile_data.is_face_flipped = tile_info.flip
 		tile_data.mesh_mode = tile_info.mode
-		_set_current_transform_params(tile_data)  # Store current transform params
+		# Restore ORIGINAL transform params from compressed data (not current settings!)
+		_restore_transform_params_from_tile_info(tile_data, tile_info)
 
 		# Place tile
 		_do_place_tile(
@@ -1902,11 +2184,105 @@ func _undo_area_fill_compressed(new_data: UndoData.UndoAreaData, old_data: UndoD
 			tile_data.mesh_rotation = tile_info.rotation
 			tile_data.is_face_flipped = tile_info.flip
 			tile_data.mesh_mode = tile_info.mode
-			# Note: Using current transform params for restored tiles
-			# TODO: Store transform params in UndoAreaData for full data persistency
-			_set_current_transform_params(tile_data)
+			# Restore ORIGINAL transform params from compressed data (not current settings!)
+			_restore_transform_params_from_tile_info(tile_data, tile_info)
 
 			# Restore tile
+			_do_place_tile(
+				tile_info.tile_key,
+				tile_info.grid_pos,
+				tile_info.uv_rect,
+				tile_info.orientation,
+				tile_info.rotation,
+				tile_data
+			)
+
+	end_batch_update()
+
+
+##  Internal method - apply compressed area fill with conflict handling
+## Erases conflicting tiles first, then places new tiles
+func _do_area_fill_compressed_with_conflicts(area_data: UndoData.UndoAreaData, conflicting_data: UndoData.UndoAreaData) -> void:
+	begin_batch_update()
+
+	# First, erase conflicting tiles (different orientation at same positions)
+	if conflicting_data:
+		var conflicting_tiles: Array = conflicting_data.to_tiles()
+		for tile_info in conflicting_tiles:
+			_do_erase_tile(tile_info.tile_key)
+
+	# Then place new tiles
+	var tiles: Array = area_data.to_tiles()
+	for tile_info in tiles:
+		var tile_data: TilePlacerData = TileDataPool.acquire()
+		tile_data.grid_position = tile_info.grid_pos
+		tile_data.uv_rect = tile_info.uv_rect
+		tile_data.orientation = tile_info.orientation
+		tile_data.mesh_rotation = tile_info.rotation
+		tile_data.is_face_flipped = tile_info.flip
+		tile_data.mesh_mode = tile_info.mode
+		# Restore ORIGINAL transform params from compressed data (not current settings!)
+		_restore_transform_params_from_tile_info(tile_data, tile_info)
+
+		_do_place_tile(
+			tile_info.tile_key,
+			tile_info.grid_pos,
+			tile_info.uv_rect,
+			tile_info.orientation,
+			tile_info.rotation,
+			tile_data
+		)
+
+	end_batch_update()
+
+
+##  Internal method - undo compressed area fill with conflict handling
+## Removes new tiles, restores old tiles (same orientation), and restores conflicting tiles
+func _undo_area_fill_compressed_with_conflicts(new_data: UndoData.UndoAreaData, old_data: UndoData.UndoAreaData, conflicting_data: UndoData.UndoAreaData) -> void:
+	begin_batch_update()
+
+	# Remove newly placed tiles
+	var new_tiles: Array = new_data.to_tiles()
+	for tile_info in new_tiles:
+		_do_erase_tile(tile_info.tile_key)
+
+	# Restore old tiles (same orientation replacements)
+	if old_data:
+		var old_tiles: Array = old_data.to_tiles()
+		for tile_info in old_tiles:
+			var tile_data: TilePlacerData = TileDataPool.acquire()
+			tile_data.grid_position = tile_info.grid_pos
+			tile_data.uv_rect = tile_info.uv_rect
+			tile_data.orientation = tile_info.orientation
+			tile_data.mesh_rotation = tile_info.rotation
+			tile_data.is_face_flipped = tile_info.flip
+			tile_data.mesh_mode = tile_info.mode
+			# Restore ORIGINAL transform params from compressed data (not current settings!)
+			_restore_transform_params_from_tile_info(tile_data, tile_info)
+
+			_do_place_tile(
+				tile_info.tile_key,
+				tile_info.grid_pos,
+				tile_info.uv_rect,
+				tile_info.orientation,
+				tile_info.rotation,
+				tile_data
+			)
+
+	# Restore conflicting tiles (different orientation)
+	if conflicting_data:
+		var conflicting_tiles: Array = conflicting_data.to_tiles()
+		for tile_info in conflicting_tiles:
+			var tile_data: TilePlacerData = TileDataPool.acquire()
+			tile_data.grid_position = tile_info.grid_pos
+			tile_data.uv_rect = tile_info.uv_rect
+			tile_data.orientation = tile_info.orientation
+			tile_data.mesh_rotation = tile_info.rotation
+			tile_data.is_face_flipped = tile_info.flip
+			tile_data.mesh_mode = tile_info.mode
+			# Restore ORIGINAL transform params from compressed data (not current settings!)
+			_restore_transform_params_from_tile_info(tile_data, tile_info)
+
 			_do_place_tile(
 				tile_info.tile_key,
 				tile_info.grid_pos,
@@ -2009,7 +2385,7 @@ func erase_area_with_undo(
 			if (tile_pos.x >= actual_min.x and tile_pos.x <= actual_max.x and
 				tile_pos.y >= actual_min.y and tile_pos.y <= actual_max.y and
 				tile_pos.z >= actual_min.z and tile_pos.z <= actual_max.z):
-				
+
 				tiles_to_erase.append({
 					"tile_key": tile_key,
 					"grid_pos": tile_data.grid_position,
@@ -2017,9 +2393,16 @@ func erase_area_with_undo(
 					"orientation": tile_data.orientation,
 					"rotation": tile_data.mesh_rotation,
 					"flip": tile_data.is_face_flipped,
-					"mode": tile_data.mesh_mode
+					"mode": tile_data.mesh_mode,
+					"terrain_id": tile_data.terrain_id,
+					"spin_angle_rad": tile_data.spin_angle_rad,
+					"tilt_angle_rad": tile_data.tilt_angle_rad,
+					"diagonal_scale": tile_data.diagonal_scale,
+					"tilt_offset_factor": tile_data.tilt_offset_factor,
+					"depth_scale": tile_data.depth_scale,
+					"texture_repeat_mode": tile_data.texture_repeat_mode
 				})
-	
+
 	elif selection_volume < MEDIUM_SELECTION_THRESHOLD:
 		# STRATEGY B: Medium selection - spatial index with quick checks
 		if GlobalConstants.DEBUG_AREA_OPERATIONS:
@@ -2045,9 +2428,16 @@ func erase_area_with_undo(
 					"orientation": tile_data.orientation,
 					"rotation": tile_data.mesh_rotation,
 					"flip": tile_data.is_face_flipped,
-					"mode": tile_data.mesh_mode
+					"mode": tile_data.mesh_mode,
+					"terrain_id": tile_data.terrain_id,
+					"spin_angle_rad": tile_data.spin_angle_rad,
+					"tilt_angle_rad": tile_data.tilt_angle_rad,
+					"diagonal_scale": tile_data.diagonal_scale,
+					"tilt_offset_factor": tile_data.tilt_offset_factor,
+					"depth_scale": tile_data.depth_scale,
+					"texture_repeat_mode": tile_data.texture_repeat_mode
 				})
-	
+
 	else:
 		# STRATEGY C: Large selection - direct iteration
 		if GlobalConstants.DEBUG_AREA_OPERATIONS:
@@ -2068,9 +2458,16 @@ func erase_area_with_undo(
 					"orientation": tile_data.orientation,
 					"rotation": tile_data.mesh_rotation,
 					"flip": tile_data.is_face_flipped,
-					"mode": tile_data.mesh_mode
+					"mode": tile_data.mesh_mode,
+					"terrain_id": tile_data.terrain_id,
+					"spin_angle_rad": tile_data.spin_angle_rad,
+					"tilt_angle_rad": tile_data.tilt_angle_rad,
+					"diagonal_scale": tile_data.diagonal_scale,
+					"tilt_offset_factor": tile_data.tilt_offset_factor,
+					"depth_scale": tile_data.depth_scale,
+					"texture_repeat_mode": tile_data.texture_repeat_mode
 				})
-	
+
 	if GlobalConstants.DEBUG_AREA_OPERATIONS:
 		print("  → Found %d tiles to erase (from %d total)" % [tiles_to_erase.size(), stats.total_tiles])
 	
@@ -2137,6 +2534,14 @@ func erase_area_with_undo(
 	return tiles_to_erase.size()
 
 
+## HELPER: Returns current tiling mode from settings
+## Used to check if backface painting is allowed (MANUAL mode only)
+func _get_tiling_mode() -> int:
+	if tile_map_layer3d_root and tile_map_layer3d_root.settings:
+		return tile_map_layer3d_root.settings.tiling_mode
+	return GlobalConstants.TILING_MODE_MANUAL  # Default
+
+
 ## HELPER: Creates a deep copy of TilePlacerData for undo/redo
 ##   Undo/redo system must use COPIES, not shared instances
 ## Reason: Object pool reuses instances - shared references lead to corruption
@@ -2148,11 +2553,14 @@ static func _copy_tile_data(source: TilePlacerData) -> TilePlacerData:
 	copy.mesh_rotation = source.mesh_rotation
 	copy.is_face_flipped = source.is_face_flipped
 	copy.mesh_mode = source.mesh_mode
+	copy.terrain_id = source.terrain_id
 	# Copy transform parameters for data persistency
 	copy.spin_angle_rad = source.spin_angle_rad
 	copy.tilt_angle_rad = source.tilt_angle_rad
 	copy.diagonal_scale = source.diagonal_scale
 	copy.tilt_offset_factor = source.tilt_offset_factor
+	copy.depth_scale = source.depth_scale
+	copy.texture_repeat_mode = source.texture_repeat_mode
 	# NOTE: multimesh_instance_index is NOT copied - it's runtime-only and will be reassigned
 	return copy
 
