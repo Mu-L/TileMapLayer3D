@@ -47,6 +47,9 @@ static func generate_report(tile_map3d: TileMapLayer3D, placement_manager: TileP
 	# SECTION 7: Health Summary
 	info += _generate_health_summary(tile_map3d, placement_manager)
 
+	# SECTION 8: Frustum Culling Diagnostics
+	info += _generate_frustum_culling_section(tile_map3d)
+
 	info += "======================================================================\n"
 	return info
 
@@ -500,6 +503,90 @@ static func _generate_health_summary(tile_map3d: TileMapLayer3D, placement_manag
 			report += "    - Check build_tile_transform() - it may be calling grid_to_world()\n"
 			report += "      which adds +0.5 alignment offset and multiplies by grid_size.\n"
 			report += "    - Solution: Use local grid positions relative to chunk region.\n"
+
+	report += "\n"
+	return report
+
+
+## SECTION 8: Frustum Culling Diagnostics
+static func _generate_frustum_culling_section(tile_map3d: TileMapLayer3D) -> String:
+	var report: String = "----------------------------------------------------------------------\n"
+	report += " [8] FRUSTUM CULLING DIAGNOSTICS                                     \n"
+	report += "----------------------------------------------------------------------\n"
+
+	# Collect all chunks
+	var all_chunks: Array = []
+	all_chunks.append_array(tile_map3d._quad_chunks)
+	all_chunks.append_array(tile_map3d._triangle_chunks)
+	all_chunks.append_array(tile_map3d._box_chunks)
+	all_chunks.append_array(tile_map3d._box_repeat_chunks)
+	all_chunks.append_array(tile_map3d._prism_chunks)
+	all_chunks.append_array(tile_map3d._prism_repeat_chunks)
+
+	if all_chunks.is_empty():
+		report += "  (No chunks to analyze)\n\n"
+		return report
+
+	report += "\n  AABB CONFIGURATION:\n"
+	report += "    Expected Local AABB: pos%s size%s\n" % [
+		_vec3_str(GlobalConstants.CHUNK_LOCAL_AABB.position),
+		_vec3_str(GlobalConstants.CHUNK_LOCAL_AABB.size)
+	]
+	report += "    Region Size: %.0f units\n" % GlobalConstants.CHUNK_REGION_SIZE
+	report += "\n"
+
+	# Show world-space AABB for each chunk
+	report += "  CHUNK WORLD-SPACE AABBs (for frustum culling):\n"
+	report += "  ─────────────────────────────────────────────────────────────────\n"
+
+	var aabb_issues: int = 0
+	for chunk in all_chunks:
+		var chunk_pos: Vector3 = chunk.position
+		var local_aabb: AABB = chunk.custom_aabb
+
+		# Calculate world-space AABB (what Godot uses for frustum culling)
+		var world_aabb_pos: Vector3 = chunk_pos + local_aabb.position
+		var world_aabb_end: Vector3 = world_aabb_pos + local_aabb.size
+
+		# Calculate expected world AABB based on region
+		var region_origin: Vector3 = Vector3(
+			float(chunk.region_key.x) * GlobalConstants.CHUNK_REGION_SIZE,
+			float(chunk.region_key.y) * GlobalConstants.CHUNK_REGION_SIZE,
+			float(chunk.region_key.z) * GlobalConstants.CHUNK_REGION_SIZE
+		)
+		var expected_world_pos: Vector3 = region_origin + GlobalConstants.CHUNK_LOCAL_AABB.position
+		var expected_world_end: Vector3 = expected_world_pos + GlobalConstants.CHUNK_LOCAL_AABB.size
+
+		var pos_ok: bool = world_aabb_pos.distance_to(expected_world_pos) < 1.0
+		var end_ok: bool = world_aabb_end.distance_to(expected_world_end) < 1.0
+
+		var status: String = "[OK]" if (pos_ok and end_ok) else "[ERROR]"
+		if not (pos_ok and end_ok):
+			aabb_issues += 1
+
+		report += "    %s %s (Region %s)\n" % [status, chunk.name, str(chunk.region_key)]
+		report += "        Chunk Position: %s\n" % _vec3_str(chunk_pos)
+		report += "        Local AABB: pos%s size%s\n" % [_vec3_str(local_aabb.position), _vec3_str(local_aabb.size)]
+		report += "        World AABB: %s to %s\n" % [_vec3_str(world_aabb_pos), _vec3_str(world_aabb_end)]
+
+		if not (pos_ok and end_ok):
+			report += "        EXPECTED:   %s to %s\n" % [_vec3_str(expected_world_pos), _vec3_str(expected_world_end)]
+		report += "\n"
+
+	# Summary
+	report += "  ─────────────────────────────────────────────────────────────────\n"
+	if aabb_issues == 0:
+		report += "  [OK] All %d chunks have correct world-space AABBs\n" % all_chunks.size()
+	else:
+		report += "  [ERROR] %d chunks have INCORRECT world-space AABBs!\n" % aabb_issues
+		report += "          Frustum culling will NOT work correctly.\n"
+
+	# Check for AABB overlap (expected with boundary padding)
+	report += "\n  AABB OVERLAP CHECK:\n"
+	report += "    With boundary padding (-0.5 to +50.5), adjacent chunks WILL overlap\n"
+	report += "    by ~1 unit. This is EXPECTED to prevent tile clipping at boundaries.\n"
+	report += "    Consequence: When camera is near region boundary, BOTH adjacent\n"
+	report += "    chunks may render even if only one has visible tiles.\n"
 
 	report += "\n"
 	return report

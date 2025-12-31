@@ -650,9 +650,9 @@ func _rebuild_chunks_from_saved_data(force_mesh_rebuild: bool = false) -> void:
 		chunk.tile_refs[tile_key] = instance_index
 		chunk.instance_to_key[instance_index] = tile_key
 
-	# NOTE: validate_and_fix_chunk_aabbs() removed in v0.4.1
-	# Large AABB is now set directly in setup_mesh() via GlobalConstants.CHUNK_CUSTOM_AABB
-	# Region-based AABBs caused frustum culling issues
+	# NOTE: validate_and_fix_chunk_aabbs() removed from automatic call in v0.4.1
+	# Local AABB is set in setup_mesh() via GlobalConstants.CHUNK_LOCAL_AABB
+	# Chunks are positioned at region origins for proper spatial frustum culling
 
 	_is_rebuilt = true
 	_update_material()
@@ -2163,51 +2163,52 @@ func _restore_chunk_buffers_after_save() -> void:
 # AABB VALIDATION & DEBUG - Ensures chunks have correct region-based AABBs
 # ==============================================================================
 
-## Ensures all chunks have the correct region-based AABB set.
+## Ensures all chunks have the correct LOCAL AABB set.
 ## Call this after rebuilding chunks or if visibility issues are suspected.
 ## This serves as a safety net to fix any chunks with incorrect AABBs.
+##
+## IMPORTANT: Chunks are positioned at their region's world origin (e.g., (50,0,0) for region (1,0,0)).
+## The custom_aabb must be LOCAL (CHUNK_LOCAL_AABB), NOT world-space.
+## Godot computes world AABB as: chunk.position + custom_aabb for frustum culling.
+##
 ## @returns: Number of chunks that had incorrect AABBs and were fixed
 func validate_and_fix_chunk_aabbs() -> int:
 	var fixed_count: int = 0
+	# All chunks should use the same LOCAL AABB - they differ only in position
+	var expected_aabb: AABB = GlobalConstants.CHUNK_LOCAL_AABB
 
 	for chunk in _quad_chunks:
 		if chunk:
-			var expected_aabb: AABB = GlobalUtil.get_region_aabb(chunk.region_key)
 			if not _aabbs_match(chunk.custom_aabb, expected_aabb):
 				chunk.custom_aabb = expected_aabb
 				fixed_count += 1
 
 	for chunk in _triangle_chunks:
 		if chunk:
-			var expected_aabb: AABB = GlobalUtil.get_region_aabb(chunk.region_key)
 			if not _aabbs_match(chunk.custom_aabb, expected_aabb):
 				chunk.custom_aabb = expected_aabb
 				fixed_count += 1
 
 	for chunk in _box_chunks:
 		if chunk:
-			var expected_aabb: AABB = GlobalUtil.get_region_aabb(chunk.region_key)
 			if not _aabbs_match(chunk.custom_aabb, expected_aabb):
 				chunk.custom_aabb = expected_aabb
 				fixed_count += 1
 
 	for chunk in _box_repeat_chunks:
 		if chunk:
-			var expected_aabb: AABB = GlobalUtil.get_region_aabb(chunk.region_key)
 			if not _aabbs_match(chunk.custom_aabb, expected_aabb):
 				chunk.custom_aabb = expected_aabb
 				fixed_count += 1
 
 	for chunk in _prism_chunks:
 		if chunk:
-			var expected_aabb: AABB = GlobalUtil.get_region_aabb(chunk.region_key)
 			if not _aabbs_match(chunk.custom_aabb, expected_aabb):
 				chunk.custom_aabb = expected_aabb
 				fixed_count += 1
 
 	for chunk in _prism_repeat_chunks:
 		if chunk:
-			var expected_aabb: AABB = GlobalUtil.get_region_aabb(chunk.region_key)
 			if not _aabbs_match(chunk.custom_aabb, expected_aabb):
 				chunk.custom_aabb = expected_aabb
 				fixed_count += 1
@@ -2253,10 +2254,12 @@ func debug_print_chunk_aabbs() -> void:
 	var correct_count: int = 0
 	var incorrect_count: int = 0
 
+	# All chunks use the same LOCAL AABB - they're positioned at region world coordinates
+	var expected_aabb: AABB = GlobalConstants.CHUNK_LOCAL_AABB
+
 	for chunk in all_chunks:
 		if not chunk:
 			continue
-		var expected_aabb: AABB = GlobalUtil.get_region_aabb(chunk.region_key)
 		var is_correct: bool = _aabbs_match(chunk.custom_aabb, expected_aabb)
 		var status: String = "[OK]" if is_correct else "[WRONG]"
 
@@ -2265,7 +2268,7 @@ func debug_print_chunk_aabbs() -> void:
 		else:
 			incorrect_count += 1
 
-		print("%s %s: region=%s, aabb=%s" % [status, chunk.name, chunk.region_key, chunk.custom_aabb])
+		print("%s %s: region=%s, pos=%s, aabb=%s" % [status, chunk.name, chunk.region_key, chunk.position, chunk.custom_aabb])
 		if not is_correct:
 			print("   Expected: %s" % expected_aabb)
 
