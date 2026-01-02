@@ -52,6 +52,11 @@ var plugin_settings: TilePlacerPluginSettings = null
 # Auto-flip signal (emitted by GlobalPlaneDetector via update_from_camera)
 signal auto_flip_requested(flip_state: bool)
 
+## Emitted when the tile placement position changes (for UI display)
+## @param world_pos: Absolute world-space position where tile will appear
+## @param grid_pos: Grid coordinates within the TileMapLayer3D node
+signal tile_position_updated(world_pos: Vector3, grid_pos: Vector3, current_plane: int)
+
 # NOTE: Multi-tile selection state REMOVED - now read from settings.selected_tiles via _get_selected_tiles()
 # The PlacementManager still maintains a runtime cache for fast painting
 
@@ -129,6 +134,17 @@ func _invalidate_preview() -> void:
 	_last_preview_grid_pos = Vector3.INF
 	_last_preview_screen_pos = Vector2.INF
 
+
+## Converts grid position to absolute world position (accounting for node transform)
+## @param grid_pos: Grid coordinates within the TileMapLayer3D node
+## @returns: Absolute world-space position where tile will appear
+func _grid_to_absolute_world(grid_pos: Vector3) -> Vector3:
+	var local_world: Vector3 = GlobalUtil.grid_to_world(grid_pos, placement_manager.grid_size)
+	if current_tile_map3d:
+		return current_tile_map3d.global_position + local_world
+	return local_world
+
+
 ## Called when current node's settings change (from any source)
 ## Syncs plugin state from Settings (for changes made outside the plugin, like Inspector)
 func _on_current_node_settings_changed() -> void:
@@ -201,6 +217,9 @@ func _enter_tree() -> void:
 	tileset_panel.clear_autotile_requested.connect(_on_clear_autotile_requested)
 	tileset_panel.autotile_mesh_mode_changed.connect(_on_autotile_mesh_mode_changed)
 	tileset_panel.autotile_depth_changed.connect(_on_autotile_depth_changed)
+
+	# Connect plugin signals TO tileset_panel (reverse direction)
+	tile_position_updated.connect(tileset_panel.update_tile_position)
 
 	# Create tool toggle button
 	tool_button = Button.new()
@@ -680,8 +699,6 @@ func _handle_cursor3d_movement(event: InputEvent, camera: Camera3D) -> int:
 	if handled:
 		if move_vector.length_squared() > 0.0:
 			tile_cursor.move_by(Vector3i(move_vector))
-		
-		tileset_panel.update_cursor_position(tile_cursor.grid_position)
 		return AFTER_GUI_INPUT_STOP
 
 	return AFTER_GUI_INPUT_PASS
@@ -716,63 +733,66 @@ func _handle_mouse_painting_movement(event: InputEvent, camera: Camera3D) -> voi
 		_paint_tile_at_mouse(camera, event.position, _is_erasing)
 		_last_paint_update_time = current_time
 
+
+## Starts a paint or erase stroke, resetting tracking state
+## @param is_erase: True for erase mode, false for paint mode
+func _start_stroke(is_erase: bool) -> void:
+	_is_painting = not is_erase
+	_is_erasing = is_erase
+	_last_painted_position = Vector3.INF
+	_last_paint_update_time = 0.0
+
+
+## Ends the current paint/erase stroke
+func _end_stroke() -> void:
+	placement_manager.end_paint_stroke()
+	_is_painting = false
+	_is_erasing = false
+
+
+## Gets the undo action name for the current selection state
+## @param is_erase: True for erase mode
+## @returns: Action name string for undo/redo
+func _get_stroke_action_name(is_erase: bool) -> String:
+	if is_erase:
+		return "Erase Tiles"
+	elif _has_multi_tile_selection():
+		return "Paint Multi-Tiles"
+	else:
+		return "Paint Tiles"
+
+
 func _handle_mouse_button_press(event: InputEvent, camera: Camera3D) -> int:
 	var is_area_selecting: bool = _area_fill_operator and _area_fill_operator.is_selecting
+	var is_left: bool = event.button_index == MOUSE_BUTTON_LEFT
+	var is_right: bool = event.button_index == MOUSE_BUTTON_RIGHT
 
-	if event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed:
-			if event.shift_pressed:
-				if _area_fill_operator:
-					_area_fill_operator.start(camera, event.position, false)
-				return AFTER_GUI_INPUT_STOP
+	if not (is_left or is_right):
+		return AFTER_GUI_INPUT_PASS
 
-			_is_painting = true
-			_is_erasing = false
-			_last_painted_position = Vector3.INF
-			_last_paint_update_time = 0.0
+	var is_erase: bool = is_right
 
-			if _has_multi_tile_selection():
-				placement_manager.start_paint_stroke(get_undo_redo(), "Paint Multi-Tiles")
-			else:
-				placement_manager.start_paint_stroke(get_undo_redo(), "Paint Tiles")
-
-			_paint_tile_at_mouse(camera, event.position, false)
+	if event.pressed:
+		# Shift+Click starts area selection
+		if event.shift_pressed and _area_fill_operator:
+			_area_fill_operator.start(camera, event.position, is_erase)
 			return AFTER_GUI_INPUT_STOP
-		else:
-			if is_area_selecting:
-				_complete_area_fill()
-				return AFTER_GUI_INPUT_STOP
 
-			if _is_painting:
-				placement_manager.end_paint_stroke()
-				_is_painting = false
-				return AFTER_GUI_INPUT_STOP
-
-	elif event.button_index == MOUSE_BUTTON_RIGHT:
-		if event.pressed:
-			if event.shift_pressed:
-				if _area_fill_operator:
-					_area_fill_operator.start(camera, event.position, true)
-				return AFTER_GUI_INPUT_STOP
-
-			_is_erasing = true
-			_is_painting = false
-			_last_painted_position = Vector3.INF
-			_last_paint_update_time = 0.0
-
-			placement_manager.start_paint_stroke(get_undo_redo(), "Erase Tiles")
-
-			_paint_tile_at_mouse(camera, event.position, true)
+		# Start paint/erase stroke
+		_start_stroke(is_erase)
+		placement_manager.start_paint_stroke(get_undo_redo(), _get_stroke_action_name(is_erase))
+		_paint_tile_at_mouse(camera, event.position, is_erase)
+		return AFTER_GUI_INPUT_STOP
+	else:
+		# Mouse button released
+		if is_area_selecting:
+			_complete_area_fill()
 			return AFTER_GUI_INPUT_STOP
-		else:
-			if is_area_selecting:
-				_complete_area_fill()
-				return AFTER_GUI_INPUT_STOP
 
-			if _is_erasing:
-				placement_manager.end_paint_stroke()
-				_is_erasing = false
-				return AFTER_GUI_INPUT_STOP
+		if _is_painting or _is_erasing:
+			_end_stroke()
+			return AFTER_GUI_INPUT_STOP
+
 	return AFTER_GUI_INPUT_PASS
 
 # =============================================================================
@@ -862,6 +882,10 @@ func _update_preview(camera: Camera3D, screen_pos: Vector2, force_update: bool =
 		var grid_coords: Vector3 = GlobalUtil.world_to_grid(ray_result.position, placement_manager.grid_size)
 		preview_grid_pos = placement_manager.snap_to_grid(grid_coords)
 
+	# Emit position for UI update (always, regardless of validity)
+	var world_pos: Vector3 = _grid_to_absolute_world(preview_grid_pos)
+	tile_position_updated.emit(world_pos, preview_grid_pos, GlobalPlaneDetector.current_plane_6d)
+
 	# POSITION VALIDATION: Check if preview position is within valid coordinate range
 	if not TileKeySystem.is_position_valid(preview_grid_pos):
 		# Show blocked highlight (bright red) instead of normal preview
@@ -873,7 +897,6 @@ func _update_preview(camera: Camera3D, screen_pos: Vector2, force_update: bool =
 	# Clear blocked highlight if position is valid
 	if current_tile_map3d:
 		current_tile_map3d.clear_blocked_highlight()
-
 	# Update preview (single, multi, or autotile)
 	if has_multi_selection:
 		# Multi-tile stamp preview (manual mode)
@@ -1614,20 +1637,13 @@ func _on_texture_repeat_mode_changed(mode: int) -> void:
 		pass  #print("[TEXTURE_REPEAT] PLUGIN: WARNING - placement_manager is null!")
 
 
-## Handler for grid size change (requires rebuild)
+## Handler for grid size change
+## NOTE: Tile position recalculation and chunk rebuild are handled by
+## TileMapLayer3D._apply_settings() via the Settings.changed signal.
+## This function syncs runtime visual components managed by the plugin.
 func _on_grid_size_changed(new_size: float) -> void:
-	#print("Grid size change requested: ", new_size)
-
-	# EARLY EXIT: Skip if grid size hasn't actually changed
-	# This prevents collision clearing when just re-selecting a node
-	# (TilesetPanel emits grid_size_changed during _load_settings_to_ui even if value unchanged)
-	if current_tile_map3d and is_equal_approx(current_tile_map3d.grid_size, new_size):
-		return
-
-	# Update all components with new grid_size
-	if current_tile_map3d:
-		current_tile_map3d.grid_size = new_size
-
+	# Always sync runtime visual components with new grid_size
+	# (Visual component setters have their own checks to prevent unnecessary redraws)
 	if placement_manager:
 		placement_manager.grid_size = new_size
 
@@ -1637,19 +1653,13 @@ func _on_grid_size_changed(new_size: float) -> void:
 	if tile_preview:
 		tile_preview.grid_size = new_size
 
-	# Clear all collision shapes (user must regenerate manually)
-	if current_tile_map3d:
-		#print("Clearing collision shapes due to grid size change...")
+	if area_fill_selector:
+		area_fill_selector.grid_size = new_size
+
+	# Clear collision shapes only if grid_size actually changed on the node
+	# (Prevents collision clearing when just re-selecting a node)
+	if current_tile_map3d and not is_equal_approx(current_tile_map3d.grid_size, new_size):
 		current_tile_map3d.clear_collision_shapes()
-
-
-	# Defer rebuild to next frame to avoid freezing during setter chain
-	if current_tile_map3d:
-		#print("Rebuilding tiles with new grid_size: ", new_size)
-		# Use call_deferred to avoid blocking the main thread
-		current_tile_map3d.call_deferred("_rebuild_chunks_from_saved_data", true)  # force_mesh_rebuild=true
-
-	#print("Grid size update initiated - rebuild in progress...")
 
 func _on_texture_filter_changed(filter_mode: int) -> void:
 	if placement_manager:

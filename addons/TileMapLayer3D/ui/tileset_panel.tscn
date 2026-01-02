@@ -271,13 +271,6 @@ max_value = 50.0
 step = 0.1
 value = 1.0
 
-[node name="CursorPositionLabel" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-text = "Cursor: (0, 0, 0)"
-horizontal_alignment = 1
-
 [node name="HSeparator5" type="HSeparator" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer"]
 layout_mode = 2
 
@@ -300,6 +293,22 @@ visible = false
 layout_mode = 0
 mouse_filter = 2
 color = Color(1, 1, 0, 0.4)
+
+[node name="HBoxContainer" type="HBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="TileWorldPosLabel" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/HBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "World: (0.0, 0.0, 0.0)"
+horizontal_alignment = 1
+
+[node name="TileGridPosLabel" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/HBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Grid: (0.0, 0.0, 0.0)"
+horizontal_alignment = 1
 
 [node name="Auto_Tiling" type="VBoxContainer" parent="TabContainer"]
 unique_name_in_owner = true
@@ -429,7 +438,7 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 0)
 layout_mode = 2
 tooltip_text = "Choose terrain color"
-color = Color(0.3292644, 0.89177364, 0.7644141, 1)
+color = Color(0.3565757, 0.7769044, 0.7384338, 1)
 
 [node name="TerrainButtonsRow" type="HBoxContainer" parent="TabContainer/Auto_Tiling/AutotileMargin/AutotileMainVBox"]
 layout_mode = 2

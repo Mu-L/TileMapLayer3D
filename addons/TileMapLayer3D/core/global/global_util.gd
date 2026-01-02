@@ -62,7 +62,7 @@ static func create_tile_material(texture: Texture2D, filter_mode: int = 0, rende
 	# Cache shader resource for performance
 	if not _cached_shader:
 		_cached_shader = load("uid://huf0b1u2f55e")
-	
+
 	if not _cached_shader_double_sided:
 		_cached_shader_double_sided = load("uid://6otniuywb7v8")
 
