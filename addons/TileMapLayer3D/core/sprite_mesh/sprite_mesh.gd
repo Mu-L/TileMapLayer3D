@@ -1,6 +1,8 @@
 @icon("icons/sprite_mesh.svg")
 class_name SpriteMesh
 extends Resource
+##Integration and based on (https://github.com/98teg/SpriteMesh)** by [98teg](https://github.com/98teg) - A Godot plugin for creating 3D meshes from 2D sprites. Licensed under the MIT License.
+
 ## [SpriteMesh] is a [Resource] that contains an array of meshes and their material.
 
 ## Array of meshes. Each mesh of the array represents a frame of the animation.

@@ -2,6 +2,8 @@
 @icon("icons/sprite_mesh_instance.svg")
 class_name SpriteMeshInstance
 extends MeshInstance3D
+##Integration and based on (https://github.com/98teg/SpriteMesh)** by [98teg](https://github.com/98teg) - A Godot plugin for creating 3D meshes from 2D sprites. Licensed under the MIT License.
+
 ## [SpriteMeshInstance], which inherit from [MeshInstance], is used to create the meshes based on
 ## the sprite. It is inspired by [Sprite3D], so many of its properties behave similarly.
 

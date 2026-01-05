@@ -1,6 +1,9 @@
 extends RefCounted
 class_name SpriteMeshGenerator
 
+
+##Integration and based on (https://github.com/98teg/SpriteMesh)** by [98teg](https://github.com/98teg) - A Godot plugin for creating 3D meshes from 2D sprites. Licensed under the MIT License.
+
 # Material cache: texture resource path + filter_mode → StandardMaterial3D
 static var _material_cache: Dictionary = {}
 
