@@ -1228,6 +1228,32 @@ func get_tiling_mode() -> TilingMode:
 	return _current_tiling_mode
 
 
+## Set tiling mode from external source (e.g., top bar buttons)
+## This updates the tab display without emitting signals (avoids loops)
+## @param mode: 0 = Manual, 1 = Autotile
+func set_tiling_mode_from_external(mode: int) -> void:
+	var new_mode: TilingMode = mode as TilingMode
+	if new_mode == _current_tiling_mode:
+		return  # No change needed
+
+	_current_tiling_mode = new_mode
+
+	# Switch tab to match mode
+	if _tab_container:
+		if new_mode == TilingMode.AUTOTILE:
+			# Find Auto_Tiling tab index
+			for i in range(_tab_container.get_tab_count()):
+				if _tab_container.get_tab_title(i) == auto_tile_tab.name:
+					_tab_container.current_tab = i
+					break
+		else:
+			# Switch to Manual tab (index 0)
+			_tab_container.current_tab = 0
+
+	# Note: Do NOT emit tiling_mode_changed here to avoid signal loops
+	# The plugin already handles the mode change via editor_ui.mode_changed
+
+
 ## Handle TileSet changes from AutotileTab
 func _on_autotile_tileset_changed(tileset: TileSet) -> void:
 	autotile_tileset_changed.emit(tileset)

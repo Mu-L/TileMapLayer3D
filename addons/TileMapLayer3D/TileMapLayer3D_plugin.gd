@@ -25,13 +25,18 @@ extends EditorPlugin
 
 ## Main plugin entry point for TileMapLayer3D
 
+# Preload UI coordinator class (ensures availability before class_name registration)
+const TileEditorUIClass = preload("res://addons/TileMapLayer3D/core/editor_ui/tile_editor_ui.gd")
+
 # =============================================================================
 # SECTION: MEMBER VARIABLES
 # =============================================================================
 
 var tileset_panel: TilesetPanel = null
-var tool_button: Button = null
 var menu_button: MenuButton = null
+
+# UI Coordinator - manages all editor UI components
+var editor_ui: RefCounted = null  # TileEditorUI (uses preloaded class)
 var placement_manager: TilePlacementManager = null
 var current_tile_map3d: TileMapLayer3D = null
 var tile_cursor: TileCursor3D = null
@@ -221,17 +226,19 @@ func _enter_tree() -> void:
 	# Connect plugin signals TO tileset_panel (reverse direction)
 	tile_position_updated.connect(tileset_panel.update_tile_position)
 
-	# Create tool toggle button
-	tool_button = Button.new()
-	tool_button.text = "Enable Tiling"
-	tool_button.tooltip_text = "Toggle 2.5D tile placement tool (select a TileMapLayer3D node first)"
-	tool_button.toggle_mode = true
-	tool_button.toggled.connect(_on_tool_toggled)
+	# Create UI coordinator (manages top bar, side toolbar, and settings)
+	editor_ui = TileEditorUIClass.new()
+	editor_ui.initialize(self)
+	editor_ui.set_tileset_panel(tileset_panel)
+	editor_ui.enabled_changed.connect(_on_tool_toggled)
+	editor_ui.mode_changed.connect(_on_editor_ui_mode_changed)
+	editor_ui.rotate_requested.connect(_on_editor_ui_rotate_requested)
+	editor_ui.tilt_requested.connect(_on_editor_ui_tilt_requested)
+	editor_ui.reset_requested.connect(_on_editor_ui_reset_requested)
+	editor_ui.flip_requested.connect(_on_editor_ui_flip_requested)
 
-	#Sprite Mesh integration 
+	# Sprite Mesh integration
 	GlobalTileMapEvents.connect_request_sprite_mesh_creation(_on_request_sprite_mesh_creation)
-	# Add to 3D editor toolbar
-	add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, tool_button)
 
 	# Create placement manager
 	placement_manager = TilePlacementManager.new()
@@ -260,9 +267,9 @@ func _exit_tree() -> void:
 		remove_control_from_docks(tileset_panel)
 		tileset_panel.queue_free()
 
-	if tool_button:
-		remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, tool_button)
-		tool_button.queue_free()
+	if editor_ui:
+		editor_ui.cleanup()
+		editor_ui = null
 
 	if placement_manager:
 		placement_manager = null
@@ -283,7 +290,15 @@ func _exit_tree() -> void:
 func _handles(object: Object) -> bool:
 	return object is TileMapLayer3D
 
-##Called when a TileMapLayer3D is selected
+
+## Called by Godot to show/hide plugin UI when node selection changes
+## This ensures the toolbar and sidebar only appear when TileMapLayer3D is selected
+func _make_visible(visible: bool) -> void:
+	if editor_ui:
+		editor_ui.set_ui_visible(visible)
+
+
+## Called when a TileMapLayer3D is selected
 func _edit(object: Object) -> void:
 	# CRITICAL FIX: Clear multi-tile selection when ANY node selection changes
 	# This prevents plugin-wide corruption where multi-selection from Node A
@@ -332,6 +347,10 @@ func _edit(object: Object) -> void:
 
 		# Update TilesetPanel to show this node's settings
 		tileset_panel.set_active_node(current_tile_map3d)
+
+		# Update UI coordinator (top bar mode/mesh buttons)
+		if editor_ui:
+			editor_ui.set_active_node(current_tile_map3d)
 
 		# Connect to node's settings.changed for sync (single source of truth)
 		GlobalUtil.safe_connect(current_tile_map3d.settings.changed, _on_current_node_settings_changed)
@@ -647,7 +666,7 @@ func _handle_mesh_rotations(event: InputEvent, camera: Camera3D) -> int:
 		if needs_update:
 			# Save rotation/flip state to settings for persistence
 			if current_tile_map3d and current_tile_map3d.settings:
-				
+
 				current_tile_map3d.settings.current_mesh_rotation = placement_manager.current_mesh_rotation
 
 				current_tile_map3d.settings.is_face_flipped = placement_manager.is_current_face_flipped
@@ -656,6 +675,9 @@ func _handle_mesh_rotations(event: InputEvent, camera: Camera3D) -> int:
 			# Passing 'true' as 3rd arg bypasses the movement optimization check
 			if tile_preview:
 				_update_preview(camera, _cached_local_mouse_pos, true)
+
+			# Update side toolbar status display
+			_update_side_toolbar_status()
 
 			# Force Godot Editor to Redraw immediately
 			update_overlays()
@@ -2026,6 +2048,107 @@ func _reset_autotile_transforms() -> void:
 	# Don't touch settings.mesh_mode - that's for Manual mode persistence
 	if tile_preview and current_tile_map3d and current_tile_map3d.settings:
 		tile_preview.current_mesh_mode = current_tile_map3d.settings.autotile_mesh_mode as GlobalConstants.MeshMode
+
+
+## Handler for tiling mode change from UI coordinator (top bar buttons)
+## Converts int mode to TilingMode enum and delegates to existing handler
+func _on_editor_ui_mode_changed(mode: int) -> void:
+	var tiling_mode: TilesetPanel.TilingMode = mode as TilesetPanel.TilingMode
+	_on_tiling_mode_changed(tiling_mode)
+
+
+## Handler for rotation request from side toolbar (Q/E buttons)
+func _on_editor_ui_rotate_requested(direction: int) -> void:
+	if not placement_manager:
+		return
+
+	placement_manager.current_mesh_rotation = (placement_manager.current_mesh_rotation + direction) % GlobalConstants.MAX_SPIN_ROTATION_STEPS
+	if placement_manager.current_mesh_rotation < 0:
+		placement_manager.current_mesh_rotation += GlobalConstants.MAX_SPIN_ROTATION_STEPS
+
+	_update_after_transform_change()
+
+
+## Handler for tilt request from side toolbar (R button)
+func _on_editor_ui_tilt_requested(reverse: bool) -> void:
+	if reverse:
+		GlobalPlaneDetector.cycle_tilt_backward()
+	else:
+		GlobalPlaneDetector.cycle_tilt_forward()
+
+	# Update flip state based on new orientation
+	var should_be_flipped: bool = GlobalPlaneDetector.determine_auto_flip_for_plane(GlobalPlaneDetector.current_plane_6d)
+	if placement_manager:
+		placement_manager.is_current_face_flipped = should_be_flipped
+
+	_update_after_transform_change()
+
+
+## Handler for reset request from side toolbar (T button)
+func _on_editor_ui_reset_requested() -> void:
+	GlobalPlaneDetector.reset_to_flat()
+
+	if placement_manager:
+		placement_manager.current_mesh_rotation = 0
+		var default_flip: bool = GlobalPlaneDetector.determine_auto_flip_for_plane(GlobalPlaneDetector.current_plane_6d)
+		placement_manager.is_current_face_flipped = default_flip
+
+	_update_after_transform_change()
+
+
+## Handler for flip request from side toolbar (F button)
+func _on_editor_ui_flip_requested() -> void:
+	if not placement_manager:
+		return
+
+	placement_manager.is_current_face_flipped = not placement_manager.is_current_face_flipped
+
+	_update_after_transform_change()
+
+
+## Common update logic after rotation/tilt/flip/reset changes
+func _update_after_transform_change() -> void:
+	# Save rotation/flip state to settings for persistence
+	if current_tile_map3d and current_tile_map3d.settings:
+		current_tile_map3d.settings.current_mesh_rotation = placement_manager.current_mesh_rotation
+		current_tile_map3d.settings.is_face_flipped = placement_manager.is_current_face_flipped
+
+	# Update preview using cached position
+	if tile_preview:
+		var camera: Camera3D = EditorInterface.get_editor_viewport_3d(0).get_camera_3d()
+		if camera:
+			_update_preview(camera, _cached_local_mouse_pos, true)
+
+	# Update side toolbar status display
+	_update_side_toolbar_status()
+
+	# Force Godot Editor to Redraw immediately
+	update_overlays()
+
+
+## Update the side toolbar status display with current rotation/tilt/flip state
+func _update_side_toolbar_status() -> void:
+	if not editor_ui:
+		return
+
+	var rotation_steps: int = 0
+	if placement_manager:
+		rotation_steps = placement_manager.current_mesh_rotation
+
+	# Calculate tilt index from current orientation's position in tilt sequence
+	var tilt_index: int = 0
+	var current_orientation: int = GlobalPlaneDetector.current_tile_orientation_18d
+	var tilt_sequence: Array = GlobalUtil.get_tilt_sequence(current_orientation)
+	if tilt_sequence.size() > 0:
+		var pos: int = tilt_sequence.find(current_orientation)
+		if pos > 0:
+			tilt_index = pos  # 0 = flat, 1 = +tilt, 2 = -tilt
+
+	var is_flipped: bool = false
+	if placement_manager:
+		is_flipped = placement_manager.is_current_face_flipped
+
+	editor_ui.update_status(rotation_steps, tilt_index, is_flipped)
 
 
 ## Handler for tiling mode change (Manual vs Autotile)
