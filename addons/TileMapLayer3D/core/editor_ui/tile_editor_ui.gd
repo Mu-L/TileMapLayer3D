@@ -79,6 +79,9 @@ var _top_bar: Control = null  # TileTopBar
 ## Side toolbar (VBoxContainer in CONTAINER_SPATIAL_EDITOR_SIDE_LEFT)
 var _side_toolbar: Control = null  # TileSideToolbar
 
+## Default location for side toolbar (Left or Right side panel)
+var _default_side_toolbar_location : EditorPlugin.CustomControlContainer = EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_RIGHT
+
 ## Reference to existing TilesetPanel (dock panel)
 var _tileset_panel: Control = null  # TilesetPanel
 
@@ -152,13 +155,13 @@ func _create_side_toolbar() -> void:
 	_side_toolbar.flip_requested.connect(_on_side_toolbar_flip_requested)
 
 	# Add to editor's left side panel
-	_plugin.add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_LEFT, _side_toolbar)
+	_plugin.add_control_to_container(_default_side_toolbar_location, _side_toolbar)
 
 
 ## Destroy the side toolbar
 func _destroy_side_toolbar() -> void:
 	if _side_toolbar and _plugin:
-		_plugin.remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_SIDE_LEFT, _side_toolbar)
+		_plugin.remove_control_from_container(_default_side_toolbar_location, _side_toolbar)
 		_side_toolbar.queue_free()
 		_side_toolbar = null
 
