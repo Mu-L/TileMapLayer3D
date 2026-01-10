@@ -23,11 +23,10 @@ script = ExtResource("1_x8k2j")
 
 [node name="TabContainer" type="TabContainer" parent="."]
 layout_mode = 2
-current_tab = 3
+current_tab = 0
 
 [node name="Manual_Tiling" type="VBoxContainer" parent="TabContainer"]
 unique_name_in_owner = true
-visible = false
 layout_mode = 2
 metadata/_tab_index = 0
 
@@ -113,17 +112,11 @@ max_value = 2.0
 step = 0.1
 value = 1.0
 
-[node name="HSeparatorGridSize" type="HSeparator" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets"]
+[node name="CursorStepLabel" type="Label" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/GridSizeControls"]
 layout_mode = 2
+text = "Step Size:"
 
-[node name="CursorStepControls" type="HBoxContainer" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets"]
-layout_mode = 2
-
-[node name="CursorStepLabel" type="Label" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/CursorStepControls"]
-layout_mode = 2
-text = "Cursor Step Size:"
-
-[node name="CursorStepDropdown" type="OptionButton" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/CursorStepControls"]
+[node name="CursorStepDropdown" type="OptionButton" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/GridSizeControls"]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Minimum 0.5 due to coordinate system precision"
@@ -144,7 +137,7 @@ layout_mode = 2
 
 [node name="GridSnapLabel" type="Label" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/GridSnapControls"]
 layout_mode = 2
-text = "Grid Snap Size:"
+text = "Grid Snap:"
 
 [node name="GridSnapDropdown" type="OptionButton" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/GridSnapControls"]
 unique_name_in_owner = true
@@ -157,38 +150,11 @@ popup/item_0/id = 0
 popup/item_1/text = "0.5 (Half)"
 popup/item_1/id = 1
 
-[node name="HSeparatorGridSnap" type="HSeparator" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets"]
-layout_mode = 2
-
-[node name="TextureFilterControls" type="HBoxContainer" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets"]
-layout_mode = 2
-
-[node name="TextureFilterLabel" type="Label" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/TextureFilterControls"]
-layout_mode = 2
-text = "Texture Filter:"
-
-[node name="TextureFilterDropdown" type="OptionButton" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/TextureFilterControls"]
-unique_name_in_owner = true
-layout_mode = 2
-selected = 0
-item_count = 4
-popup/item_0/text = "Nearest"
-popup/item_0/id = 0
-popup/item_1/text = "Nearest Mipmap"
-popup/item_1/id = 1
-popup/item_2/text = "Linear"
-popup/item_2/id = 2
-popup/item_3/text = "Linear Mipmap"
-popup/item_3/id = 3
-
-[node name="HSeparatorTextureFilter" type="HSeparator" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets"]
-layout_mode = 2
-
-[node name="ShowPlaneGridsCheckbox" type="CheckBox" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets"]
+[node name="ShowPlaneGridsCheckbox" type="CheckBox" parent="TabContainer/Manual_Tiling/FoldableContainer/MarginContainer/PanelContainer/TileSets/GridSnapControls"]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
-text = "Show 3D cursor grids (Y,X,Z)"
+text = "Show grid"
 
 [node name="TileSetPlacementPanel" type="MarginContainer" parent="TabContainer/Manual_Tiling"]
 layout_mode = 2
@@ -208,9 +174,33 @@ layout_mode = 2
 [node name="PlacementTileControls" type="VBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer"]
 layout_mode = 2
 
-[node name="PlacementTIleMode" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls"]
+[node name="TilePlacement" type="HBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls"]
+layout_mode = 2
+
+[node name="PlacementTIleMode" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TilePlacement"]
 layout_mode = 2
 text = "Tile Placement controls"
+
+[node name="GenerateSpriteMeshButton" type="Button" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TilePlacement"]
+unique_name_in_owner = true
+layout_direction = 3
+layout_mode = 2
+tooltip_text = "Create a SpriteMesh object based on the selected tiles"
+text = "Create SpriteMesh"
+
+[node name="SpriteMeshDetph" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TilePlacement"]
+visible = false
+layout_mode = 2
+text = "Depth:"
+
+[node name="SpriteMeshDepthSpinBox" type="SpinBox" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TilePlacement"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+min_value = 0.1
+max_value = 50.0
+step = 0.1
+value = 1.0
 
 [node name="TileModeButtons" type="VBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls"]
 layout_mode = 2
@@ -248,28 +238,23 @@ max_value = 1.0
 step = 0.1
 value = 0.1
 
-[node name="SpriteMeshHboxCont" type="HBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons"]
-layout_mode = 2
-
-[node name="GenerateSpriteMeshButton" type="Button" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/SpriteMeshHboxCont"]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "Create a SpriteMesh object based on the selected tiles"
-text = "Create SpriteMesh"
-
-[node name="SpriteMeshDetph" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/SpriteMeshHboxCont"]
+[node name="TileSelectModeOptions" type="HBoxContainer" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons"]
 visible = false
 layout_mode = 2
-text = "Depth:"
 
-[node name="SpriteMeshDepthSpinBox" type="SpinBox" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/SpriteMeshHboxCont"]
-unique_name_in_owner = true
-visible = false
+[node name="TileUVSelectLabel" type="Label" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/TileSelectModeOptions"]
 layout_mode = 2
-min_value = 0.1
-max_value = 50.0
-step = 0.1
-value = 1.0
+text = "UV Mode"
+
+[node name="TileUVModeDropdown" type="OptionButton" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer/PlacementTileControls/TileModeButtons/TileSelectModeOptions"]
+unique_name_in_owner = true
+layout_mode = 2
+selected = 0
+item_count = 2
+popup/item_0/text = "TILES"
+popup/item_0/id = 0
+popup/item_1/text = "POINTS"
+popup/item_1/id = 1
 
 [node name="HSeparator5" type="HSeparator" parent="TabContainer/Manual_Tiling/TileSetPlacementPanel/PanelContainer/TileSetMainBoxContainer"]
 layout_mode = 2
@@ -438,7 +423,7 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 0)
 layout_mode = 2
 tooltip_text = "Choose terrain color"
-color = Color(0.3565757, 0.7769044, 0.7384338, 1)
+color = Color(0.48181328, 0.3418578, 0.69998586, 1)
 
 [node name="TerrainButtonsRow" type="HBoxContainer" parent="TabContainer/Auto_Tiling/AutotileMargin/AutotileMainVBox"]
 layout_mode = 2
@@ -632,6 +617,7 @@ layout_mode = 2
 layout_mode = 2
 
 [node name="Other" type="VBoxContainer" parent="TabContainer"]
+visible = false
 layout_mode = 2
 metadata/_tab_index = 3
 
@@ -672,6 +658,27 @@ text = "Clear all tiles"
 unique_name_in_owner = true
 layout_mode = 2
 text = "Repeat Texture (Box/Prism Meshes)"
+
+[node name="TextureFilterControls" type="HBoxContainer" parent="TabContainer/Other/DebugOptions/MarginContainer/DebugButtonsGrid"]
+layout_mode = 2
+
+[node name="TextureFilterLabel" type="Label" parent="TabContainer/Other/DebugOptions/MarginContainer/DebugButtonsGrid/TextureFilterControls"]
+layout_mode = 2
+text = "Texture Filter:"
+
+[node name="TextureFilterDropdown" type="OptionButton" parent="TabContainer/Other/DebugOptions/MarginContainer/DebugButtonsGrid/TextureFilterControls"]
+unique_name_in_owner = true
+layout_mode = 2
+selected = 0
+item_count = 4
+popup/item_0/text = "Nearest"
+popup/item_0/id = 0
+popup/item_1/text = "Nearest Mipmap"
+popup/item_1/id = 1
+popup/item_2/text = "Linear"
+popup/item_2/id = 2
+popup/item_3/text = "Linear Mipmap"
+popup/item_3/id = 3
 
 [node name="LoadTextureDialog" type="FileDialog" parent="."]
 unique_name_in_owner = true

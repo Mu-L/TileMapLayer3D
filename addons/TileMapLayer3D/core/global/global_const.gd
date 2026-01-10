@@ -356,6 +356,11 @@ const MAX_TEXTURE_FILTER_MODE: int = 3
 ## Used for array sizing and iteration
 const TEXTURE_FILTER_COUNT: int = 4
 
+enum Tile_UV_Select_Mode {
+	TILE = 0,
+	POINTS = 1
+}
+
 #endregion
 # ==============================================================================
 #region TILE KEY FORMATTING

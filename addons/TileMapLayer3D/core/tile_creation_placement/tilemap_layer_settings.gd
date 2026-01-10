@@ -185,6 +185,18 @@ extends Resource
 			autotile_mesh_mode = value
 			emit_changed()
 
+
+@export_group("Vertex Editing")
+
+## UV Select mode: 0 = TILE, 1 = POINTS
+## Used to determine how to select the TExture from TileSetPanel
+@export var uv_selection_mode: GlobalConstants.Tile_UV_Select_Mode = GlobalConstants.Tile_UV_Select_Mode.TILE: # Tile_UV_Select_Mode
+	set(value):
+		if uv_selection_mode != value:
+			uv_selection_mode = value
+			emit_changed()
+
+
 # ==============================================================================
 # EDITOR STATE
 # ==============================================================================
