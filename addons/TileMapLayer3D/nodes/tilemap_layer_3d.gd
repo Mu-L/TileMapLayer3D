@@ -585,6 +585,7 @@ func _get_chunk_config(mesh_mode: GlobalConstants.MeshMode, texture_repeat: int)
 	return _chunk_configs[key]
 
 
+#TODO: MOVE TO ANOTHER CLASS
 ## Creates a new ChunkConfig for the specified mesh mode and texture repeat mode
 ## @param mesh_mode: Type of mesh
 ## @param texture_repeat: Texture repeat mode
@@ -632,6 +633,7 @@ func _create_chunk_config(mesh_mode: GlobalConstants.MeshMode, texture_repeat: i
 	return config
 
 
+#TODO: MOVE TO ANOTHER CLASS
 ## Generic chunk factory - creates or reuses a chunk in the specified region
 ## Replaces 6 duplicate _get_or_create_*_chunk_in_region functions
 ## @param region_key: Spatial region coordinates (Vector3i)
@@ -666,11 +668,12 @@ func _get_or_create_chunk_in_region(
 	]
 
 	# Setup mesh (handles texture_repeat_mode internally for BOX/PRISM)
-	if config.texture_repeat_mode != GlobalConstants.TextureRepeatMode.DEFAULT:
+	if config.texture_repeat_mode != GlobalConstants.TextureRepeatMode.DEFAULT and (config.chunk_class == BoxTileChunk or config.chunk_class == PrismTileChunk):
 		chunk.texture_repeat_mode = config.texture_repeat_mode
 		chunk.setup_mesh(grid_size, config.texture_repeat_mode)
 	else:
 		chunk.setup_mesh(grid_size)
+
 
 	# Apply appropriate material
 	if config.needs_double_sided:
@@ -690,7 +693,7 @@ func _get_or_create_chunk_in_region(
 	config.flat_array.append(chunk)
 	return chunk
 
-
+#TODO: MOVE TO ANOTHER CLASS or GLOBAL UTIL
 ## Helper to get chunk from TileRef based on mesh mode, texture repeat mode, and region
 ## Uses region registries for O(1) lookup by region_key_packed + chunk_index
 ## Falls back to flat array lookup for backward compatibility with pre-region TileRefs
@@ -750,7 +753,7 @@ func _get_chunk_by_ref(tile_ref: TileRef) -> MultiMeshTileChunkBase:
 
 	return null
 
-
+#TODO: MOVE TO ANOTHER CLASS or GLOBAL UTIL
 ## Parses region key from chunk name for legacy support and scene loading
 ## Legacy format: "SquareChunk_0" → returns Vector3i.ZERO
 ## New format: "SquareChunk_R0_0_0_C0" → extracts region Vector3i(0, 0, 0)
@@ -1024,7 +1027,7 @@ func save_tile_data_direct(
 	)
 	_saved_tiles_lookup[tile_key] = new_index
 
-
+#TODO: REMOVE TILEPLACER ALLTOGETHER
 ## Saves tile data to persistent storage (called by placement manager)
 ## Uses columnar storage for efficient scene file serialization
 ## ⚠️ DEPRECATED - Use save_tile_data_direct() instead
@@ -1413,6 +1416,7 @@ func _cleanup_orphaned_chunk_nodes() -> void:
 # COLUMNAR STORAGE - Migration and Access Functions
 # ==============================================================================
 
+#TODO: REMOVE AFTER WE REPLACE TILEPLACER ALLTOGETHER
 ## One-time migration from Array[TilePlacerData] to columnar storage
 ## ⚠️ USES DEPRECATED TilePlacerData - ONLY for migration from old format
 ## This is the ONLY place where reading TilePlacerData from saved_tiles[] is acceptable
@@ -1804,6 +1808,7 @@ func clear_all_tiles() -> void:
 # SAVE/RESTORE HELPERS - Strip MultiMesh buffers for scene file size reduction
 # ==============================================================================
 
+#TODO: REFACTOR ENTIRE SECTION AFTER TILEPLACERDATA REMOVED
 ## Strips MultiMesh buffer data before scene save (reduces file size)
 ## Runtime rebuilds from columnar tile data in _ready()
 func _strip_chunk_buffers_for_save() -> void:
