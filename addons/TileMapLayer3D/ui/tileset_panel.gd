@@ -51,6 +51,9 @@ extends PanelContainer
 @onready var autotile_mesh_dropdown: OptionButton = %AutoTileModeDropdown
 @onready var _tab_container: TabContainer = $TabContainer
 
+#UV MOde Tile Select #TODO New Logic //DEBUG 
+@onready var tile_uvmode_dropdown: OptionButton = %TileUVModeDropdown
+
 
 
 # Emitted when user selects a single tile
@@ -138,10 +141,8 @@ enum TilingMode {
 }
 var _current_tiling_mode: TilingMode = TilingMode.MANUAL
 
-# Multi-tile selection state (Phase 2)
-var _is_dragging: bool = false
-var _drag_start_pos: Vector2 = Vector2.ZERO
-var _selected_tiles: Array[Rect2] = []  # Multiple UV rects for multi-selection
+# Tile selection state
+var _selected_tiles: Array[Rect2] = []  # Multiple UV rects for multi-selection (managed by TilesetDisplay)
 
 func _ready() -> void:
 	#if not Engine.is_editor_hint(): return
@@ -174,20 +175,15 @@ func _connect_signals() -> void:
 		tile_size_y.value_changed.connect(_on_tile_size_changed)
 		#print("   TileSizeY connected")
 
-	# Connect tileset display signals
+	if tile_uvmode_dropdown:
+		if not tile_uvmode_dropdown.item_selected.is_connected(_on_tile_uvmode_selected):
+			tile_uvmode_dropdown.item_selected.connect(_on_tile_uvmode_selected)
+
+	# NOTE: TilesetDisplay handles input directly via _gui_input()
+	# Selection handled internally, but connect to corner editing signal for POINTS mode
 	if tileset_display:
-		if not tileset_display.tile_drag_started.is_connected(_on_tile_drag_started):
-			tileset_display.tile_drag_started.connect(_on_tile_drag_started)
-			#print("   TilesetDisplay drag_started connected")
-		if not tileset_display.tile_drag_updated.is_connected(_on_tile_drag_updated):
-			tileset_display.tile_drag_updated.connect(_on_tile_drag_updated)
-			#print("   TilesetDisplay drag_updated connected")
-		if not tileset_display.tile_drag_ended.is_connected(_on_tile_drag_ended):
-			tileset_display.tile_drag_ended.connect(_on_tile_drag_ended)
-			#print("   TilesetDisplay drag_ended connected")
-		if not tileset_display.zoom_requested.is_connected(_on_zoom_requested):
-			tileset_display.zoom_requested.connect(_on_zoom_requested)
-			#print("   TilesetDisplay zoom_requested connected")
+		if not tileset_display.select_vertices_data_changed.is_connected(_on_select_vertices_data_changed):
+			tileset_display.select_vertices_data_changed.connect(_on_select_vertices_data_changed)
 
 	# Connect show plane grids checkbox
 	if show_plane_grids_checkbox and not show_plane_grids_checkbox.toggled.is_connected(_on_show_plane_grids_toggled):
@@ -330,7 +326,7 @@ func _on_selection_manager_changed(tiles: Array[Rect2], anchor: int) -> void:
 				int(_selected_tiles[0].position.x / _tile_size.x),
 				int(_selected_tiles[0].position.y / _tile_size.y)
 			)
-		_update_selection_highlight()
+		tileset_display._update_tile_selection_preview()
 	else:
 		if selection_highlight:
 			selection_highlight.visible = false
@@ -367,7 +363,7 @@ func set_tileset_texture(texture: Texture2D) -> void:
 			tileset_display.size = texture.get_size()
 
 	# Reset selection when texture changes
-	clear_selection()
+	tileset_display.clear_selection()
 
 
 
@@ -516,6 +512,10 @@ func _load_settings_to_ui(settings: TileMapLayerSettings) -> void:
 	if mesh_mode_depth_spin_box:
 		mesh_mode_depth_spin_box.value = settings.current_depth_scale
 
+	#Sync UV Tile selection mode
+	if tile_uvmode_dropdown:
+		tile_uvmode_dropdown.selected = settings.uv_selection_mode
+
 	# Sync BOX/PRISM texture repeat mode checkbox
 	if box_texture_repeat_checkbox:
 		box_texture_repeat_checkbox.button_pressed = (settings.texture_repeat_mode == GlobalConstants.TextureRepeatMode.REPEAT)
@@ -571,7 +571,10 @@ func _save_ui_to_settings() -> void:
 	# Save grid snap size (per-node persistence)
 	if grid_snap_dropdown and grid_snap_dropdown.selected >= 0:
 		current_node.settings.grid_snap_size = GlobalConstants.GRID_SNAP_OPTIONS[grid_snap_dropdown.selected]
-
+	
+	# Save UV Tile Selection Mode
+	if tile_uvmode_dropdown:
+		current_node.settings.uv_selection_mode = tile_uvmode_dropdown.selected
 	# Reset flag - saving complete
 	_is_loading_from_node = false
 
@@ -679,7 +682,7 @@ func _on_tile_size_changed(value: float) -> void:
 		#print("Tile size changed: ", _tile_size)
 		# Update selection highlight if we have a selection
 		if has_selection:
-			_update_selection_highlight()
+			tileset_display._update_tile_selection_preview()
 
 		# Save to node's settings Resource
 		_save_ui_to_settings()
@@ -688,276 +691,44 @@ func _on_tile_size_changed(value: float) -> void:
 
 
 # ==============================================================================
-# TilesetDisplay / Tile Selection INPUT EVENTS
+# TilesetDisplay / Tile Selection SIGNAL ROUTING
 # ==============================================================================
 
-## Signal handlers for TilesetDisplay input events
-func _on_zoom_requested(direction: int, focal_point: Vector2) -> void:
-	# print("Zoom requested: direction=", direction, " focal=", focal_point)
-	if direction > 0:
-		_handle_zoom_in(focal_point)
-	else:
-		_handle_zoom_out(focal_point)
-
-func _on_tile_drag_started(position: Vector2) -> void:
-	# print("Drag started at event pos: ", position)
-	_is_dragging = true
-	# Convert to texture coordinates (scroll + zoom aware)
-	_drag_start_pos = _screen_to_texture_coords(position)
-	# print("  → Texture coords: ", _drag_start_pos)
-
-func _on_tile_drag_updated(position: Vector2) -> void:
-	if _is_dragging:
-		# Convert to texture coordinates before updating selection
-		var texture_pos: Vector2 = _screen_to_texture_coords(position)
-		_update_drag_selection(texture_pos)
-
-func _on_tile_drag_ended(position: Vector2) -> void:
-	# print("Drag ended at event pos: ", position)
-	if _is_dragging:
-		_is_dragging = false
-		# Convert to texture coordinates before finalizing
-		var texture_pos: Vector2 = _screen_to_texture_coords(position)
-		# print("  → Texture coords: ", texture_pos)
-		_finalize_selection(texture_pos)
-
-func _handle_tile_click(mouse_pos: Vector2) -> void:
-	if not current_texture:
-		return
-
-	# Calculate which tile was clicked
-	var tile_coords: Vector2i = Vector2i(
-		int(mouse_pos.x / _tile_size.x),
-		int(mouse_pos.y / _tile_size.y)
-	)
-
-	# Calculate UV rect in pixel coordinates
-	var uv_rect: Rect2 = Rect2(
-		Vector2(tile_coords) * Vector2(_tile_size),
-		Vector2(_tile_size)
-	)
-
-	# Validate bounds
-	var texture_size: Vector2 = current_texture.get_size()
-	if uv_rect.position.x >= texture_size.x or uv_rect.position.y >= texture_size.y:
-		return
-
-	selected_tile_coords = tile_coords
-	has_selection = true
-	tile_selected.emit(uv_rect)
-
-	#   Release UI focus so WASD input returns to 3D viewport
-	# Without this, keyboard input stays trapped in the UI panel
-	if tileset_display and tileset_display.has_focus():
-		tileset_display.release_focus()
-
-	# print("Tile selected at coords: ", tile_coords, " UV rect: ", uv_rect)
-
-	# Update visual highlight
-	_update_selection_highlight()
-
-
-
-
-func _update_selection_highlight() -> void:
-	if not has_selection or not selection_highlight:
-		return
-
-	# Show and position the highlight rectangle
-	selection_highlight.visible = true
-
-	# Multi-tile selection: expand highlight to cover all selected tiles
-	if _selected_tiles.size() > 1:
-		var min_pos: Vector2 = Vector2(INF, INF)
-		var max_pos: Vector2 = Vector2(-INF, -INF)
-
-		for uv_rect in _selected_tiles:
-			min_pos.x = min(min_pos.x, uv_rect.position.x)
-			min_pos.y = min(min_pos.y, uv_rect.position.y)
-			max_pos.x = max(max_pos.x, uv_rect.position.x + uv_rect.size.x)
-			max_pos.y = max(max_pos.y, uv_rect.position.y + uv_rect.size.y)
-
-		# Position relative to TilesetDisplay parent (child coordinate system)
-		selection_highlight.position = min_pos * _current_zoom
-		selection_highlight.size = (max_pos - min_pos) * _current_zoom
-		# print("Multi-tile selection highlight: ", _selected_tiles.size(), " tiles")
-	else:
-		# Single tile selection - scale by zoom
-		var tile_pixel_pos: Vector2 = Vector2(selected_tile_coords) * Vector2(_tile_size)
-		selection_highlight.position = tile_pixel_pos * _current_zoom
-		selection_highlight.size = Vector2(_tile_size) * _current_zoom
-
-	# print("Selection highlight updated: pos=", selection_highlight.position, " size=", selection_highlight.size)
-
-## Clears tile selection (used when entering box erase mode)
-func clear_selection() -> void:
-	has_selection = false
-	_selected_tiles.clear()
-	selected_tile_coords = Vector2i(-1, -1)
-
-	# Hide selection highlight
-	if selection_highlight:
-		selection_highlight.visible = false
-
-## Snaps a pixel position to the tile grid (top-left corner of containing tile)
-func _snap_to_tile_grid(pixel_pos: Vector2) -> Vector2:
-	var tile_coords: Vector2i = Vector2i(
-		int(pixel_pos.x / _tile_size.x),
-		int(pixel_pos.y / _tile_size.y)
-	)
-	return Vector2(tile_coords) * Vector2(_tile_size)
-
-## Updates drag selection visual during mouse motion
-func _update_drag_selection(current_pos: Vector2) -> void:
-	if not selection_highlight:
-		return
-
-	# Snap both positions to tile grid for aligned selection
-	var grid_start: Vector2 = _snap_to_tile_grid(_drag_start_pos)
-	var grid_current: Vector2 = _snap_to_tile_grid(current_pos)
-
-	# Calculate selection rectangle from snapped positions
-	var rect_min: Vector2 = Vector2(
-		min(grid_start.x, grid_current.x),
-		min(grid_start.y, grid_current.y)
-	)
-	var rect_max: Vector2 = Vector2(
-		max(grid_start.x, grid_current.x) + _tile_size.x,  # Include full tile
-		max(grid_start.y, grid_current.y) + _tile_size.y
-	)
-
-	# Show preview of selection area (grid-aligned, scaled by zoom)
-	selection_highlight.visible = true
-	selection_highlight.position = rect_min * _current_zoom
-	selection_highlight.size = (rect_max - rect_min) * _current_zoom
-
-## Finalizes selection when mouse is released
-func _finalize_selection(end_pos: Vector2) -> void:
-	if not current_texture:
-		return
-
-	# Snap both positions to tile grid first
-	var grid_start: Vector2 = _snap_to_tile_grid(_drag_start_pos)
-	var grid_end: Vector2 = _snap_to_tile_grid(end_pos)
-
-	# Calculate selection rectangle from snapped positions
-	var rect_min: Vector2 = Vector2(
-		min(grid_start.x, grid_end.x),
-		min(grid_start.y, grid_end.y)
-	)
-	var rect_max: Vector2 = Vector2(
-		max(grid_start.x, grid_end.x),
-		max(grid_start.y, grid_end.y)
-	)
-
-	# Convert to tile coordinates (already grid-snapped, so simple division)
-	var tile_min: Vector2i = Vector2i(
-		int(rect_min.x / _tile_size.x),
-		int(rect_min.y / _tile_size.y)
-	)
-	var tile_max: Vector2i = Vector2i(
-		int(rect_max.x / _tile_size.x),
-		int(rect_max.y / _tile_size.y)
-	)
-
-	# Calculate number of tiles in selection
-	var tile_count_x: int = tile_max.x - tile_min.x + 1
-	var tile_count_y: int = tile_max.y - tile_min.y + 1
-	var total_tiles: int = tile_count_x * tile_count_y
-
-	# print("Selection: ", tile_min, " to ", tile_max, " = ", total_tiles, " tiles")
-
-	# Single tile selection (click without drag or 1x1 area)
-	if total_tiles == 1:
-		_handle_single_tile_selection(tile_min)
-		return
-
-	# Multi-tile selection
-	_handle_multi_tile_selection(tile_min, tile_max, total_tiles)
-
-## Handles single tile selection (original behavior)
-func _handle_single_tile_selection(tile_coords: Vector2i) -> void:
-	# Calculate UV rect
-	var uv_rect: Rect2 = Rect2(
-		Vector2(tile_coords) * Vector2(_tile_size),
-		Vector2(_tile_size)
-	)
-
-	# Validate bounds
-	var texture_size: Vector2 = current_texture.get_size()
-	if uv_rect.position.x >= texture_size.x or uv_rect.position.y >= texture_size.y:
-		return
-
-	selected_tile_coords = tile_coords
-	has_selection = true
-	_selected_tiles.clear()
-	_selected_tiles.append(uv_rect)
-
-	# Save tile selection to node's settings
-	_save_ui_to_settings()
-
-	tile_selected.emit(uv_rect)
-
-	#   Release UI focus so WASD input returns to 3D viewport
-	# Without this, keyboard input stays trapped in the UI panel
-	if tileset_display and tileset_display.has_focus():
-		tileset_display.release_focus()
-
-	_update_selection_highlight()
-	# print("Single tile selected: ", tile_coords)
-
-
-## Handles multi-tile selection (new Phase 2 functionality)
-func _handle_multi_tile_selection(tile_min: Vector2i, tile_max: Vector2i, total_tiles: int) -> void:
-	# Build array of UV rects for all selected tiles
-	_selected_tiles.clear()
-	var texture_size: Vector2 = current_texture.get_size()
-	var tiles_added: int = 0
-
-	for y in range(tile_min.y, tile_max.y + 1):
-		for x in range(tile_min.x, tile_max.x + 1):
-			# Enforce selection limit - stop adding tiles once we hit the cap
-			if tiles_added >= GlobalConstants.PREVIEW_POOL_SIZE:
-				push_warning("TilesetPanel: Selection capped at %d tiles (tried to select %d)" % [GlobalConstants.PREVIEW_POOL_SIZE, total_tiles])
-				break
-
-			var tile_coords: Vector2i = Vector2i(x, y)
-			var uv_rect: Rect2 = Rect2(
-				Vector2(tile_coords) * Vector2(_tile_size),
-				Vector2(_tile_size)
-			)
-
-			# Skip tiles outside texture bounds
-			if uv_rect.position.x >= texture_size.x or uv_rect.position.y >= texture_size.y:
-				continue
-
-			_selected_tiles.append(uv_rect)
-			tiles_added += 1
-
-		# Break outer loop too if we hit the cap
-		if tiles_added >= GlobalConstants.PREVIEW_POOL_SIZE:
-			break
-
+## Called by TilesetDisplay after selection finalized
+## Emits appropriate signals for SelectionManager and downstream systems
+func _emit_selection_signals() -> void:
 	if _selected_tiles.size() == 0:
 		return
+	elif _selected_tiles.size() == 1:
+		# Single tile selection
+		tile_selected.emit(_selected_tiles[0])
+	else:
+		# Multi-tile selection (anchor_index = 0 for top-left)
+		multi_tile_selected.emit(_selected_tiles, 0)
 
-	selected_tile_coords = tile_min  # Store top-left for reference
-	has_selection = true
 
-	# Save tile selection to node's settings
+func _on_tile_uvmode_selected(index: int) -> void:
+	# When switching to POINTS mode, initialize corners for selected tile
+	if index == GlobalConstants.Tile_UV_Select_Mode.POINTS:
+		if not _selected_tiles.is_empty() and tileset_display:
+			var first_tile_uv: Rect2 = _selected_tiles[0]
+			var tile_coord := Vector2i(
+				int(first_tile_uv.position.x / _tile_size.x),
+				int(first_tile_uv.position.y / _tile_size.y)
+			)
+			tileset_display.initialize_tile_vertices(tile_coord, _tile_size)
+
+	# Save to node's settings Resource
 	_save_ui_to_settings()
 
-	# Emit multi-tile selection signal (anchor_index = 0 for top-left)
-	multi_tile_selected.emit(_selected_tiles, 0)
 
-	#   Release UI focus so WASD input returns to 3D viewport
-	# Without this, keyboard input stays trapped in the UI panel
-	if tileset_display and tileset_display.has_focus():
-		tileset_display.release_focus()
+## Called when corner data is edited in POINTS mode
+func _on_select_vertices_data_changed(tile: Vector2i, corners: Array) -> void:
+	print("TilesetPanel: Vertices data received for tile ", tile, ": ", corners)
+	# TODO: Store corner data for this tile
+	# For now, corners are managed by TilesetDisplay
+	# Future: Emit signal or store in settings if needed for 3D tile placement
 
-	_update_selection_highlight()
-
-	# print("Multi-tile selection: ", _selected_tiles.size(), " tiles selected")
 
 # ==============================================================================
 # Sprite Mesh Generation and Integration section

@@ -1273,7 +1273,7 @@ func _on_selection_manager_cleared() -> void:
 
 	# Clear UI highlight
 	if tileset_panel:
-		tileset_panel.clear_selection()
+		tileset_panel.tileset_display.clear_selection()
 
 	# Hide preview
 	if tile_preview:
