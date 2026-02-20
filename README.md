@@ -1,5 +1,24 @@
 ## TileMapLayer3D 🧩
+**Version 0.6.0** - Multiple important updates and refactors.
+
+UI Updates:
+- Revamped UI: Left Toolbar is now the main toolbar; Bottom Toolbar becomes a Context Panel showing controls relevant to each mode
+- TilePlacer Panel moved to the lower editor area for more texture display space
+- New Zoom and Pan controls in the Tile Selection screen
+- Mode switching now via Main Toolbar buttons on the left
+
+New mode: Smart Select: Raycast-based tile selection that finds regular, rotated, and tilted tiles with precision. Includes three selection modes:
+- Single Pick - Select individual tiles (additive — clicking more tiles adds to selection)
+- Connected UV - Selects all tiles on the same Grid Plane that share identical UV/texture
+- Connected Neighbor - Selects all tiles on the same Grid Plane regardless of texture
+
+Smart Select Operations:
+- Delete - Remove/Delete all tiles in selection
+- Replace UV/Texture - Replace selected tiles' texture with the current TileSet panel selection
+
+
 **Version 0.5.0** - New UI, Toolbar and Data model (If you use versions before 0.4, this will break old scenes). Migrate to 0.4 first then to 0.5
+
 **Version 0.4.0** - Major update with 3D mesh modes, SpriteMesh integration, and optimized storage.
 
 Godot 4.5+ editor plugin for building 3D tile-based levels from 2D tilesheets. Heavily inspired by Crocotile3D but built directly into Godot.
