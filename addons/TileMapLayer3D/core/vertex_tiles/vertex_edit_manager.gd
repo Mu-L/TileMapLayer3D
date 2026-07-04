@@ -233,6 +233,10 @@ func undo_convert_tile(tile_key: int) -> void:
 	# Destroy vertex mesh
 	_destroy_mesh_instance(tile_key)
 
+	# Remove vertex region membership BEFORE erasing the entry (needs corners).
+	# The columnar rebuild below re-adds this tile as a normal columnar tile.
+	_tile_map._unregister_vertex_tile_from_region(tile_key)
+
 	# Remove from vertex storage
 	_tile_map.erase_vertex_corners(tile_key)
 
@@ -259,6 +263,9 @@ func delete_vertex_tile(tile_key: int) -> void:
 	# Destroy MeshInstance3D
 	_destroy_mesh_instance(tile_key)
 
+	# Remove region membership BEFORE erasing the entry (needs corners to resolve region)
+	_tile_map._unregister_vertex_tile_from_region(tile_key)
+
 	# Remove from vertex storage
 	_tile_map.erase_vertex_corners(tile_key)
 
@@ -274,6 +281,9 @@ func undo_delete_vertex_tile(tile_key: int, entry: VertexTileEntry) -> void:
 
 	# Restore vertex entry
 	_tile_map.set_vertex_entry(tile_key, entry)
+
+	# Re-register region membership so raycast picking can hit it again
+	_tile_map._register_vertex_tile_in_region(tile_key)
 
 	# Rebuild mesh
 	rebuild_mesh(tile_key)
@@ -300,8 +310,12 @@ func update_corner(tile_key: int, corner_idx: int, new_pos: Vector3) -> void:
 	var corners: PackedVector3Array = _tile_map.get_vertex_corners(tile_key)
 	if corners.size() != 4 or corner_idx < 0 or corner_idx > 3:
 		return
+	# Moving a corner can shift the centroid across a region boundary — remove the
+	# old membership before the change, re-register from the new centroid after.
+	_tile_map._unregister_vertex_tile_from_region(tile_key)
 	corners[corner_idx] = new_pos
 	_tile_map.set_vertex_corners(tile_key, corners)
+	_tile_map._register_vertex_tile_in_region(tile_key)
 	rebuild_mesh(tile_key)
 
 

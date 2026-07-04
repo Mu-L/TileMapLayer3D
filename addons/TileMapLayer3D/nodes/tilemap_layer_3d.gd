@@ -630,9 +630,13 @@ func _rebuild_chunks_from_saved_data(force_mesh_rebuild: bool = false) -> void:
 		chunk.instance_to_key[instance_index] = tile_key
 		_register_tile_in_region(tile_key, i, chunk)
 
-	# Rebuild standalone MeshInstance3D nodes for vertex-edited tiles
+	# Rebuild standalone MeshInstance3D nodes for vertex-edited tiles, and register
+	# each vertex tile into the region system so raycast picking can hit it
+	# (region_system.clear() above wiped stale membership).
 	if not _vertex_tile_corners.is_empty():
 		_rebuild_vertex_tile_meshes()
+		for vtx_key: int in _vertex_tile_corners.keys():
+			_register_vertex_tile_in_region(vtx_key)
 
 	_is_rebuilt = true
 	_update_material()
@@ -2095,6 +2099,35 @@ func destroy_vertex_mesh_instance(tile_key: int) -> void:
 		if is_instance_valid(mesh_inst):
 			mesh_inst.queue_free()
 		_vertex_tile_mesh_instances.erase(tile_key)
+
+
+## Packed region key for a vertex tile, resolved from its corner centroid.
+## Corners are stored in WORLD space; the region system + pick ray march work in
+## node-local space, so convert world->local first. Returns 0 if no valid entry.
+func _vertex_tile_region_packed(tile_key: int) -> int:
+	var entry: VertexTileEntry = get_vertex_entry(tile_key)
+	if entry == null or entry.corners.size() != 4:
+		return 0
+	var c: PackedVector3Array = entry.corners
+	var centroid_local: Vector3 = global_transform.affine_inverse() * ((c[0] + c[1] + c[2] + c[3]) / 4.0)
+	return RegionSystem.pack(RegionSystem.resolve_region_key(centroid_local))
+
+
+## Register a vertex-edited tile into the region system so raycast picking
+## (SmartSelectManager.pick_tile_at) can hit it. Region resolved from corner centroid.
+func _register_vertex_tile_in_region(tile_key: int) -> void:
+	var entry: VertexTileEntry = get_vertex_entry(tile_key)
+	if entry == null or entry.corners.size() != 4:
+		return
+	var c: PackedVector3Array = entry.corners
+	var centroid_local: Vector3 = global_transform.affine_inverse() * ((c[0] + c[1] + c[2] + c[3]) / 4.0)
+	region_system.register_vertex_tile(tile_key, centroid_local)
+
+
+## Remove a vertex-edited tile's region membership. Must be called BEFORE the
+## entry is erased from _vertex_tile_corners (needs the corners to resolve the region).
+func _unregister_vertex_tile_from_region(tile_key: int) -> void:
+	region_system.unregister_vertex_tile(tile_key, _vertex_tile_region_packed(tile_key))
 
 ## Returns terrain_id from columnar storage, or -1 if tile doesn't exist
 func get_tile_terrain_id(tile_key: int) -> int:

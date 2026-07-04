@@ -52,6 +52,15 @@ func add_vertex_tile(tile_key: int) -> void:
 		vertex_tile_keys.append(tile_key)
 
 
+## Remove a vertex-edited tile from this region by tile_key. Returns true if found.
+func remove_vertex_tile(tile_key: int) -> bool:
+	var idx: int = vertex_tile_keys.find(tile_key)
+	if idx < 0:
+		return false
+	vertex_tile_keys.remove_at(idx)
+	return true
+
+
 ## Remove a tile from this region by tile_key. Returns true if found.
 func remove_tile(tile_key: int) -> bool:
 	var idx: int = tile_keys.find(tile_key)

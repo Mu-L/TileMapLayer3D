@@ -189,6 +189,24 @@ func unregister_tile(tile_key: int, region_key_packed: int) -> void:
 		_registry.erase(region_key_packed)
 
 
+## Register a vertex-edited tile into the region containing world_pos.
+## Vertex tiles live outside columnar storage, so they need explicit regional
+## membership for raycast picking (SmartSelectManager.pick_tile_at).
+func register_vertex_tile(tile_key: int, world_pos: Vector3) -> void:
+	var packed: int = pack(resolve_region_key(world_pos))
+	get_or_create_region(packed).add_vertex_tile(tile_key)
+
+
+## Remove a vertex-edited tile from a specific region. Removes the region when empty.
+func unregister_vertex_tile(tile_key: int, region_key_packed: int) -> void:
+	var region: TerrainRegionChunk = _registry.get(region_key_packed, null)
+	if region == null:
+		return
+	region.remove_vertex_tile(tile_key)
+	if region.is_empty():
+		_registry.erase(region_key_packed)
+
+
 ## March a ray through the region voxel grid in distance order (3D DDA,
 ## Amanatides & Woo 1987). Only visits registered regions — empty cells are
 ## skipped cheaply. Stops once the next step would exceed [param max_distance].
