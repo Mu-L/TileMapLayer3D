@@ -295,7 +295,7 @@ func _validate_data_structure_integrity() -> Dictionary:
 		var chunk: TileChunkRender = active_tile_map_layer3d._get_chunk_by_ref(tile_ref)
 		if not chunk:
 			errors.append("ORPHANED: TileRef key=%d has invalid registry reference (mesh_mode=%d texture_repeat=%d region=%d chunk_index=%d)" %
-			              [tile_key, tile_ref.mesh_mode, tile_ref.texture_repeat_mode, tile_ref.region_key_packed, tile_ref.chunk_index])
+						  [tile_key, tile_ref.mesh_mode, tile_ref.texture_repeat_mode, tile_ref.region_key_packed, tile_ref.chunk_index])
 			orphaned_refs += 1
 
 	stats["orphaned_refs_found"] = orphaned_refs
@@ -446,28 +446,26 @@ func _raycast_to_cursor_plane(camera: Camera3D, screen_pos: Vector2) -> Vector3:
 
 	return _apply_canvas_bounds_grid(raw_grid_pos, plane_normal, cursor_3d.grid_position)
 
-func _apply_canvas_bounds_grid(grid_pos: Vector3, plane_normal: Vector3, cursor_grid_pos: Vector3) -> Vector3:
-	var constrained: Vector3 = grid_pos
-	var max_distance: float = GlobalConstants.MAX_CANVAS_DISTANCE
+func _apply_canvas_bounds_grid(grid_pos: Vector3,plane_normal: Vector3,cursor_grid_pos: Vector3
+) -> Vector3:
+	var constrained := grid_pos
+	var aligned_cursor := cursor_grid_pos - GlobalConstants.GRID_ALIGNMENT_OFFSET #Adjust for the offset applied to the cursor's grid position
+	var max_distance := GlobalConstants.MAX_CANVAS_DISTANCE
 
 	if plane_normal == Vector3.UP:
-		constrained.y = cursor_grid_pos.y
-		constrained.x = clampf(constrained.x, cursor_grid_pos.x - max_distance, cursor_grid_pos.x + max_distance)
-		constrained.z = clampf(constrained.z, cursor_grid_pos.z - max_distance, cursor_grid_pos.z + max_distance)
-
+		constrained.y = aligned_cursor.y
+		constrained.x = clampf(constrained.x, aligned_cursor.x - max_distance, aligned_cursor.x + max_distance)
+		constrained.z = clampf(constrained.z, aligned_cursor.z - max_distance, aligned_cursor.z + max_distance)
 	elif plane_normal == Vector3.RIGHT:
-		constrained.x = cursor_grid_pos.x
-		constrained.y = clampf(constrained.y, cursor_grid_pos.y - max_distance, cursor_grid_pos.y + max_distance)
-		constrained.z = clampf(constrained.z, cursor_grid_pos.z - max_distance, cursor_grid_pos.z + max_distance)
-
+		constrained.x = aligned_cursor.x
+		constrained.y = clampf(constrained.y, aligned_cursor.y - max_distance, aligned_cursor.y + max_distance)
+		constrained.z = clampf(constrained.z, aligned_cursor.z - max_distance, aligned_cursor.z + max_distance)
 	else:
-		constrained.z = cursor_grid_pos.z
-		constrained.x = clampf(constrained.x, cursor_grid_pos.x - max_distance, cursor_grid_pos.x + max_distance)
-		constrained.y = clampf(constrained.y, cursor_grid_pos.y - max_distance, cursor_grid_pos.y + max_distance)
+		constrained.z = aligned_cursor.z
+		constrained.x = clampf(constrained.x, aligned_cursor.x - max_distance, aligned_cursor.x + max_distance)
+		constrained.y = clampf(constrained.y, aligned_cursor.y - max_distance, aligned_cursor.y + max_distance)
 
 	return constrained
-
-
 
 func _add_tile_to_multimesh(
 	grid_pos: Vector3,
@@ -576,7 +574,7 @@ func _remove_tile_from_multimesh(tile_key: int) -> void:
 
 	if not chunk:
 		push_error(" ORPHANED TILEREF: Tile key %d has invalid %s chunk_index %d (region_key=%d) - cleaning up orphaned reference" %
-		           [tile_key, chunk_type_name, tile_ref.chunk_index, tile_ref.region_key_packed])
+				   [tile_key, chunk_type_name, tile_ref.chunk_index, tile_ref.region_key_packed])
 		active_tile_map_layer3d.remove_tile_ref(tile_key)
 		_spatial_index.remove_tile(tile_key)
 		return
@@ -1372,7 +1370,7 @@ func erase_area_with_undo(
 
 	if GlobalConstants.DEBUG_AREA_OPERATIONS:
 		print("Area Erase: %.1fx%.1fx%.1f (volume=%.1f, diagonal=%.1f)" %
-		      [selection_size.x, selection_size.y, selection_size.z, selection_volume, selection_diagonal])
+			  [selection_size.x, selection_size.y, selection_size.z, selection_volume, selection_diagonal])
 
 	var tiles_to_erase: Array = []
 
